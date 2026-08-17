@@ -10,6 +10,8 @@ import {
 import { desc, eq } from "drizzle-orm"
 import { revalidatePath } from "next/cache"
 
+export type ReceiptType = "purchase" | "credit"
+
 export type ReceiptItemInput = {
   productId: number
   productName: string
@@ -23,6 +25,9 @@ export type ReceiptInput = {
   locationId: number
   vendorId: number
   orderDate: string
+  type?: ReceiptType
+  creditReason?: string | null
+  notes?: string | null
   items: ReceiptItemInput[]
 }
 
@@ -33,6 +38,9 @@ export type ReceiptListRow = {
   locationName: string
   vendorName: string
   orderDate: string
+  type: ReceiptType
+  creditReason: string | null
+  notes: string | null
   amount: number
   totalCases: number
 }
@@ -54,6 +62,9 @@ export type ReceiptDetail = {
   locationName: string
   vendorName: string
   orderDate: string
+  type: ReceiptType
+  creditReason: string | null
+  notes: string | null
   items: ReceiptDetailItem[]
 }
 
@@ -66,6 +77,9 @@ export async function getReceipts(): Promise<ReceiptListRow[]> {
       locationName: locations.name,
       vendorName: vendors.name,
       orderDate: receipts.orderDate,
+      type: receipts.type,
+      creditReason: receipts.creditReason,
+      notes: receipts.notes,
     })
     .from(receipts)
     .leftJoin(locations, eq(receipts.locationId, locations.id))
@@ -88,6 +102,9 @@ export async function getReceipts(): Promise<ReceiptListRow[]> {
     locationName: r.locationName ?? "Unknown",
     vendorName: r.vendorName ?? "Unknown",
     orderDate: r.orderDate,
+    type: (r.type as ReceiptType) || "purchase",
+    creditReason: r.creditReason ?? null,
+    notes: r.notes ?? null,
     amount: totals.get(r.id)?.amount ?? 0,
     totalCases: totals.get(r.id)?.cases ?? 0,
   }))
@@ -102,6 +119,9 @@ export async function getReceipt(id: number): Promise<ReceiptDetail | null> {
       locationName: locations.name,
       vendorName: vendors.name,
       orderDate: receipts.orderDate,
+      type: receipts.type,
+      creditReason: receipts.creditReason,
+      notes: receipts.notes,
     })
     .from(receipts)
     .leftJoin(locations, eq(receipts.locationId, locations.id))
@@ -122,6 +142,9 @@ export async function getReceipt(id: number): Promise<ReceiptDetail | null> {
     locationName: row.locationName ?? "Unknown",
     vendorName: row.vendorName ?? "Unknown",
     orderDate: row.orderDate,
+    type: (row.type as ReceiptType) || "purchase",
+    creditReason: row.creditReason ?? null,
+    notes: row.notes ?? null,
     items: items.map((it) => ({
       id: it.id,
       productId: it.productId,
@@ -156,6 +179,9 @@ export async function createReceipt(input: ReceiptInput) {
       locationId: input.locationId,
       vendorId: input.vendorId,
       orderDate: input.orderDate,
+      type: input.type || "purchase",
+      creditReason: input.type === "credit" ? (input.creditReason || "Expired Product") : null,
+      notes: input.notes?.trim() || null,
     })
     .returning()
 
@@ -187,6 +213,9 @@ export async function updateReceipt(id: number, input: ReceiptInput) {
       locationId: input.locationId,
       vendorId: input.vendorId,
       orderDate: input.orderDate,
+      type: input.type || "purchase",
+      creditReason: input.type === "credit" ? (input.creditReason || "Expired Product") : null,
+      notes: input.notes?.trim() || null,
     })
     .where(eq(receipts.id, id))
 

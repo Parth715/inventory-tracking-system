@@ -36,6 +36,9 @@ export const receipts = pgTable("receipts", {
   locationId: integer("location_id").notNull(),
   vendorId: integer("vendor_id").notNull(),
   orderDate: date("order_date").notNull(),
+  type: text("type").notNull().default("purchase"), // 'purchase' | 'credit'
+  creditReason: text("credit_reason"), // e.g. 'Expired Product', 'Damaged', etc.
+  notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 })
 

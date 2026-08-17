@@ -26,7 +26,9 @@ export default async function NewOrderPage() {
         <ArrowLeft className="size-4" />
         Back to receipts
       </Link>
-      <h1 className="mb-6 text-2xl font-semibold tracking-tight">New Order</h1>
+      <h1 className="mb-6 text-2xl font-semibold tracking-tight">
+        New Order / Credit Memo
+      </h1>
       <OrderForm locations={locations} vendors={vendors} products={products} />
     </PageShell>
   )

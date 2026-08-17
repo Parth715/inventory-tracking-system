@@ -53,13 +53,13 @@ export function ReceiptDetailView({
       <div>
         <button
           onClick={() => setEditing(false)}
-          className="mb-6 inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="mb-6 inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
         >
           <ArrowLeft className="size-4" />
           Cancel edit
         </button>
         <h1 className="mb-6 text-2xl font-semibold tracking-tight">
-          Edit Receipt #{receipt.id}
+          {receipt.type === "credit" ? "Edit Credit Memo" : "Edit Receipt"} #{receipt.id}
         </h1>
         <OrderForm
           locations={locations}
@@ -79,7 +79,7 @@ export function ReceiptDetailView({
           className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="size-4" />
-          Back to receipts
+          Back to receipts & credits
         </Link>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => window.print()}>
@@ -107,9 +107,11 @@ export function ReceiptDetailView({
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Delete receipt?</DialogTitle>
+            <DialogTitle>
+              {receipt.type === "credit" ? "Delete credit memo?" : "Delete receipt?"}
+            </DialogTitle>
             <DialogDescription>
-              This will permanently remove receipt #{receipt.id} and all its
+              This will permanently remove this {receipt.type === "credit" ? "credit memo" : "receipt"} #{receipt.id} and all its
               items. This cannot be undone.
             </DialogDescription>
           </DialogHeader>
@@ -126,7 +128,7 @@ export function ReceiptDetailView({
               onClick={handleDelete}
               disabled={deleting}
             >
-              {deleting ? "Deleting..." : "Delete receipt"}
+              {deleting ? "Deleting..." : receipt.type === "credit" ? "Delete credit memo" : "Delete receipt"}
             </Button>
           </DialogFooter>
         </DialogContent>

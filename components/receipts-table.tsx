@@ -3,7 +3,15 @@
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { ArrowDown, ArrowUp, ChevronsUpDown, Plus, Search } from "lucide-react"
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronsUpDown,
+  Package,
+  Plus,
+  RotateCcw,
+  Search,
+} from "lucide-react"
 import type { ReceiptListRow } from "@/app/actions/receipts"
 import { formatCurrency, formatDate } from "@/lib/units"
 import { cn } from "@/lib/utils"
@@ -41,6 +49,7 @@ export function ReceiptsTable({
   const [query, setQuery] = useState("")
   const [locationFilter, setLocationFilter] = useState("all")
   const [vendorFilter, setVendorFilter] = useState("all")
+  const [typeFilter, setTypeFilter] = useState<"all" | "purchase" | "credit">("all")
   const [sortKey, setSortKey] = useState<SortKey>("orderDate")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
 
@@ -56,6 +65,7 @@ export function ReceiptsTable({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     let rows = receipts.filter((r) => {
+      if (typeFilter !== "all" && r.type !== typeFilter) return false
       if (locationFilter !== "all" && String(r.locationId) !== locationFilter)
         return false
       if (vendorFilter !== "all" && String(r.vendorId) !== vendorFilter)
@@ -65,22 +75,36 @@ export function ReceiptsTable({
         r.locationName.toLowerCase().includes(q) ||
         r.vendorName.toLowerCase().includes(q) ||
         formatDate(r.orderDate).toLowerCase().includes(q) ||
-        `#${r.id}`.includes(q)
+        `#${r.id}`.includes(q) ||
+        (r.creditReason && r.creditReason.toLowerCase().includes(q)) ||
+        (r.notes && r.notes.toLowerCase().includes(q))
       )
     })
 
     rows = [...rows].sort((a, b) => {
       let cmp = 0
-      if (sortKey === "amount") cmp = a.amount - b.amount
-      else if (sortKey === "orderDate")
+      if (sortKey === "amount") {
+        const aVal = a.type === "credit" ? -a.amount : a.amount
+        const bVal = b.type === "credit" ? -b.amount : b.amount
+        cmp = aVal - bVal
+      } else if (sortKey === "orderDate") {
         cmp = a.orderDate.localeCompare(b.orderDate)
-      else cmp = a[sortKey].localeCompare(b[sortKey])
+      } else {
+        cmp = a[sortKey].localeCompare(b[sortKey])
+      }
       return sortDir === "asc" ? cmp : -cmp
     })
     return rows
-  }, [receipts, query, locationFilter, vendorFilter, sortKey, sortDir])
+  }, [receipts, query, locationFilter, vendorFilter, typeFilter, sortKey, sortDir])
 
-  const grandTotal = filtered.reduce((sum, r) => sum + r.amount, 0)
+  const totalPurchases = filtered
+    .filter((r) => r.type !== "credit")
+    .reduce((sum, r) => sum + r.amount, 0)
+  const totalCredits = filtered
+    .filter((r) => r.type === "credit")
+    .reduce((sum, r) => sum + r.amount, 0)
+  const netSpend = totalPurchases - totalCredits
+  const totalCases = filtered.reduce((sum, r) => sum + r.totalCases, 0)
 
   return (
     <div className="space-y-4">
@@ -90,10 +114,23 @@ export function ReceiptsTable({
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by location, vendor, date, or #"
+            placeholder="Search by location, vendor, date, reason, or #"
             className="pl-9"
           />
         </div>
+        <Select
+          value={typeFilter}
+          onValueChange={(v) => setTypeFilter(v as "all" | "purchase" | "credit")}
+        >
+          <SelectTrigger className="w-full sm:w-44">
+            <SelectValue placeholder="All types" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All types</SelectItem>
+            <SelectItem value="purchase">Orders only</SelectItem>
+            <SelectItem value="credit">Credits only</SelectItem>
+          </SelectContent>
+        </Select>
         <Select value={locationFilter} onValueChange={setLocationFilter}>
           <SelectTrigger className="w-full sm:w-44">
             <SelectValue placeholder="All locations" />
@@ -108,7 +145,7 @@ export function ReceiptsTable({
           </SelectContent>
         </Select>
         <Select value={vendorFilter} onValueChange={setVendorFilter}>
-          <SelectTrigger className="w-full sm:w-48">
+          <SelectTrigger className="w-full sm:w-44">
             <SelectValue placeholder="All vendors" />
           </SelectTrigger>
           <SelectContent>
@@ -126,6 +163,7 @@ export function ReceiptsTable({
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/50 hover:bg-muted/50">
+              <TableHead className="w-24">Type</TableHead>
               <SortableHead
                 label="Location"
                 active={sortKey === "locationName"}
@@ -159,60 +197,98 @@ export function ReceiptsTable({
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="h-32 text-center">
+                <TableCell colSpan={6} className="h-32 text-center">
                   <div className="flex flex-col items-center gap-3 text-muted-foreground">
-                    <p>No receipts found.</p>
+                    <p>No receipts or credit memos found.</p>
                     <Button asChild variant="outline" size="sm">
                       <Link href="/orders/new">
                         <Plus className="size-4" />
-                        Create your first order
+                        Create your first entry
                       </Link>
                     </Button>
                   </div>
                 </TableCell>
               </TableRow>
             ) : (
-              filtered.map((r) => (
-                <TableRow
-                  key={r.id}
-                  onClick={() => router.push(`/receipts/${r.id}`)}
-                  className="cursor-pointer"
-                >
-                  <TableCell className="font-medium">
-                    {r.locationName}
-                    <span className="ml-2 text-xs text-muted-foreground">
-                      #{r.id}
-                    </span>
-                  </TableCell>
-                  <TableCell>{r.vendorName}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDate(r.orderDate)}
-                  </TableCell>
-                  <TableCell className="text-right font-mono font-medium tabular-nums">
-                    {formatCurrency(r.amount)}
-                  </TableCell>
-                  <TableCell className="text-right font-mono tabular-nums text-muted-foreground hidden sm:table-cell">
-                    {r.totalCases}
-                  </TableCell>
-                </TableRow>
-              ))
+              filtered.map((r) => {
+                const isCredit = r.type === "credit"
+                return (
+                  <TableRow
+                    key={r.id}
+                    onClick={() => router.push(`/receipts/${r.id}`)}
+                    className="cursor-pointer"
+                  >
+                    <TableCell>
+                      {isCredit ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
+                          <RotateCcw className="size-3" />
+                          Credit
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                          <Package className="size-3" />
+                          Order
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      {r.locationName}
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        #{r.id}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      {r.vendorName}
+                      {isCredit && r.creditReason && (
+                        <span className="block text-xs text-amber-700/80 dark:text-amber-400/80">
+                          {r.creditReason}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {formatDate(r.orderDate)}
+                    </TableCell>
+                    <TableCell
+                      className={cn(
+                        "text-right font-mono font-medium tabular-nums",
+                        isCredit && "text-amber-700 dark:text-amber-400",
+                      )}
+                    >
+                      {isCredit ? "-" : ""}
+                      {formatCurrency(r.amount)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono tabular-nums text-muted-foreground hidden sm:table-cell">
+                      {r.totalCases}
+                    </TableCell>
+                  </TableRow>
+                )
+              })
             )}
           </TableBody>
         </Table>
       </div>
 
-      <div className="flex items-center justify-between px-1 text-sm text-muted-foreground">
+      <div className="flex flex-col gap-2 px-1 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
         <span>
-          {filtered.length} {filtered.length === 1 ? "receipt" : "receipts"}
-          {" · "}
-          {filtered.reduce((s, r) => s + r.totalCases, 0).toLocaleString()} cases
+          {filtered.length} {filtered.length === 1 ? "entry" : "entries"} (
+          {totalCases.toLocaleString()} cases)
         </span>
-        <span>
-          Total:{" "}
-          <span className="font-mono font-semibold text-foreground tabular-nums">
-            {formatCurrency(grandTotal)}
+        <div className="flex flex-wrap items-center gap-4 text-xs sm:text-sm">
+          {totalCredits > 0 && (
+            <span className="text-amber-700 dark:text-amber-400">
+              Credits:{" "}
+              <span className="font-mono font-semibold tabular-nums">
+                -{formatCurrency(totalCredits)}
+              </span>
+            </span>
+          )}
+          <span>
+            Net Spend:{" "}
+            <span className="font-mono font-semibold text-foreground tabular-nums">
+              {formatCurrency(netSpend)}
+            </span>
           </span>
-        </span>
+        </div>
       </div>
     </div>
   )
