@@ -29,6 +29,7 @@ export const products = pgTable("products", {
   unit: text("unit").notNull().default("oz"),
   caseCount: integer("case_count").notNull().default(0),
   defaultCasePrice: numeric("default_case_price"),
+  retailPrice: numeric("retail_price"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 })
 
