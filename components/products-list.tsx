@@ -7,6 +7,7 @@ import { Pencil, Plus, Search, Trash2 } from "lucide-react"
 import type { Product, Vendor } from "@/lib/db/schema"
 import { deleteProduct } from "@/app/actions/catalog"
 import { formatCurrency, formatPackage } from "@/lib/units"
+import { cn } from "@/lib/utils"
 import { ProductDialog } from "@/components/product-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -124,16 +125,19 @@ export function ProductsList({
               <TableHead className="hidden sm:table-cell">Vendor</TableHead>
               <TableHead className="hidden md:table-cell">Package</TableHead>
               <TableHead className="hidden md:table-cell text-right">
-                Units/Case
+                Units/Cs
               </TableHead>
-              <TableHead className="text-right">Default Price</TableHead>
-              <TableHead className="w-28 text-right">Actions</TableHead>
+              <TableHead className="text-right">Case Price</TableHead>
+              <TableHead className="text-right hidden lg:table-cell">Unit Cost</TableHead>
+              <TableHead className="text-right hidden lg:table-cell">Retail (SRP)</TableHead>
+              <TableHead className="text-right hidden lg:table-cell">Margin %</TableHead>
+              <TableHead className="w-24 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-32 text-center">
+                <TableCell colSpan={9} className="h-32 text-center">
                   <p className="text-muted-foreground">
                     {query || vendorFilter !== "all"
                       ? "No products match your search."
@@ -142,52 +146,82 @@ export function ProductsList({
                 </TableCell>
               </TableRow>
             ) : (
-              filtered.map((p) => (
-                <TableRow key={p.id}>
-                  <TableCell>
-                    <span className="font-medium">{p.name}</span>
-                    <span className="ml-2 text-xs text-muted-foreground sm:hidden">
+              filtered.map((p) => {
+                const casePrice = p.defaultCasePrice ? Number(p.defaultCasePrice) : null
+                const units = p.caseCount || 0
+                const unitCost = casePrice && units > 0 ? casePrice / units : null
+                const retail = p.retailPrice ? Number(p.retailPrice) : null
+                const marginPct = unitCost && retail && retail > 0 ? ((retail - unitCost) / retail) * 100 : null
+
+                return (
+                  <TableRow key={p.id}>
+                    <TableCell>
+                      <span className="font-medium">{p.name}</span>
+                      <span className="ml-2 text-xs text-muted-foreground sm:hidden">
+                        {vendorMap.get(p.vendorId) ?? "Unknown"}
+                      </span>
+                    </TableCell>
+                    <TableCell className="hidden text-muted-foreground sm:table-cell">
                       {vendorMap.get(p.vendorId) ?? "Unknown"}
-                    </span>
-                  </TableCell>
-                  <TableCell className="hidden text-muted-foreground sm:table-cell">
-                    {vendorMap.get(p.vendorId) ?? "Unknown"}
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell">
-                    {formatPackage(Number(p.packageSize), p.unit)}
-                  </TableCell>
-                  <TableCell className="hidden text-right font-mono tabular-nums md:table-cell">
-                    {p.caseCount || "—"}
-                  </TableCell>
-                  <TableCell className="text-right font-mono tabular-nums">
-                    {p.defaultCasePrice
-                      ? formatCurrency(Number(p.defaultCasePrice))
-                      : "—"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-8 text-muted-foreground hover:text-foreground"
-                        onClick={() => setEditTarget(p)}
-                      >
-                        <Pencil className="size-4" />
-                        <span className="sr-only">Edit</span>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-8 text-muted-foreground hover:text-destructive"
-                        onClick={() => setDeleteTarget(p)}
-                      >
-                        <Trash2 className="size-4" />
-                        <span className="sr-only">Delete</span>
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell">
+                      {formatPackage(Number(p.packageSize), p.unit)}
+                    </TableCell>
+                    <TableCell className="hidden text-right font-mono tabular-nums md:table-cell">
+                      {p.caseCount || "—"}
+                    </TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">
+                      {casePrice != null ? formatCurrency(casePrice) : "—"}
+                    </TableCell>
+                    <TableCell className="text-right font-mono tabular-nums hidden lg:table-cell text-muted-foreground">
+                      {unitCost != null ? formatCurrency(unitCost) : "—"}
+                    </TableCell>
+                    <TableCell className="text-right font-mono tabular-nums hidden lg:table-cell font-medium">
+                      {retail != null ? formatCurrency(retail) : "—"}
+                    </TableCell>
+                    <TableCell className="text-right font-mono tabular-nums hidden lg:table-cell">
+                      {marginPct != null ? (
+                        <span
+                          className={cn(
+                            "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold",
+                            marginPct >= 40
+                              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                              : marginPct >= 25
+                                ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                                : "bg-gray-500/15 text-gray-700 dark:text-gray-400",
+                          )}
+                        >
+                          {marginPct.toFixed(1)}%
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 text-muted-foreground hover:text-foreground"
+                          onClick={() => setEditTarget(p)}
+                        >
+                          <Pencil className="size-4" />
+                          <span className="sr-only">Edit</span>
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => setDeleteTarget(p)}
+                        >
+                          <Trash2 className="size-4" />
+                          <span className="sr-only">Delete</span>
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )
+              })
             )}
           </TableBody>
         </Table>

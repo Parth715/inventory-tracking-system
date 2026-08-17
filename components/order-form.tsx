@@ -393,11 +393,17 @@ export function OrderForm({
                     {draftType === "credit" ? "Credited Product" : "Delivered Product"}
                   </Label>
                   <SearchableSelect
-                    options={vendorProducts.map((p) => ({
-                      value: String(p.id),
-                      label: p.name,
-                      hint: formatPackage(Number(p.packageSize), p.unit),
-                    }))}
+                    options={vendorProducts.map((p) => {
+                      const casePrice = p.defaultCasePrice ? Number(p.defaultCasePrice) : null
+                      const unitCost = casePrice && p.caseCount > 0 ? casePrice / p.caseCount : null
+                      return {
+                        value: String(p.id),
+                        label: p.name,
+                        hint: `${formatPackage(Number(p.packageSize), p.unit)}${
+                          unitCost != null ? ` · $${unitCost.toFixed(2)}/ea` : ""
+                        }`,
+                      }
+                    })}
                     value={productId}
                     onChange={handleProductChange}
                     placeholder="Select product"
@@ -596,6 +602,38 @@ export function OrderForm({
                 {formatCurrency(Math.abs(netGrandTotal))}
               </dd>
             </div>
+
+            {/* Projected Margin if Retail Prices available */}
+            {(() => {
+              const retailMap = new Map(products.map((p) => [p.id, { caseCount: p.caseCount, retail: Number(p.retailPrice) || 0 }]))
+              const projectedRetail = chargedItems.reduce((s, it) => {
+                const p = retailMap.get(it.productId)
+                return s + (p && p.retail && p.caseCount ? it.cases * p.caseCount * p.retail : 0)
+              }, 0)
+              if (projectedRetail <= 0 || grossTotal <= 0) return null
+              const profit = projectedRetail - grossTotal
+              const margin = (profit / projectedRetail) * 100
+              return (
+                <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-1.5 mt-2">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Est. Retail Value</span>
+                    <span className="font-mono font-medium text-foreground">{formatCurrency(projectedRetail)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Est. Gross Profit</span>
+                    <span className="font-mono font-medium text-emerald-600 dark:text-emerald-400">
+                      {formatCurrency(profit)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs font-semibold text-foreground pt-1 border-t border-emerald-500/15">
+                    <span>Est. Profit Margin</span>
+                    <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                      {margin.toFixed(1)}%
+                    </span>
+                  </div>
+                </div>
+              )
+            })()}
           </dl>
 
           <Button
