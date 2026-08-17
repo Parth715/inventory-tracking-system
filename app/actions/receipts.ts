@@ -10,6 +10,7 @@ import {
 import { desc, eq } from "drizzle-orm"
 import { revalidatePath } from "next/cache"
 
+export type LineItemType = "charge" | "credit"
 export type ReceiptType = "purchase" | "credit"
 
 export type ReceiptItemInput = {
@@ -19,6 +20,8 @@ export type ReceiptItemInput = {
   unit: string
   cases: number
   pricePerCase: number
+  itemType?: LineItemType
+  reason?: string | null
 }
 
 export type ReceiptInput = {
@@ -28,6 +31,7 @@ export type ReceiptInput = {
   type?: ReceiptType
   creditReason?: string | null
   notes?: string | null
+  isPaid?: boolean
   items: ReceiptItemInput[]
 }
 
@@ -41,8 +45,15 @@ export type ReceiptListRow = {
   type: ReceiptType
   creditReason: string | null
   notes: string | null
-  amount: number
+  isPaid: boolean
+  paidAt: Date | null
+  amount: number // Net Amount (Charges - Credits)
+  grossAmount: number // Total Charges
+  creditAmount: number // Total Credits
   totalCases: number
+  chargeCases: number
+  creditCases: number
+  hasCredits: boolean
 }
 
 export type ReceiptDetailItem = {
@@ -53,6 +64,8 @@ export type ReceiptDetailItem = {
   unit: string
   cases: number
   pricePerCase: number
+  itemType: LineItemType
+  reason: string | null
 }
 
 export type ReceiptDetail = {
@@ -65,7 +78,12 @@ export type ReceiptDetail = {
   type: ReceiptType
   creditReason: string | null
   notes: string | null
+  isPaid: boolean
+  paidAt: Date | null
   items: ReceiptDetailItem[]
+  grossAmount: number
+  creditAmount: number
+  netAmount: number
 }
 
 export async function getReceipts(): Promise<ReceiptListRow[]> {
@@ -80,6 +98,8 @@ export async function getReceipts(): Promise<ReceiptListRow[]> {
       type: receipts.type,
       creditReason: receipts.creditReason,
       notes: receipts.notes,
+      isPaid: receipts.isPaid,
+      paidAt: receipts.paidAt,
     })
     .from(receipts)
     .leftJoin(locations, eq(receipts.locationId, locations.id))
@@ -87,27 +107,68 @@ export async function getReceipts(): Promise<ReceiptListRow[]> {
     .orderBy(desc(receipts.orderDate), desc(receipts.id))
 
   const items = await db.select().from(receiptItems)
-  const totals = new Map<number, { amount: number; cases: number }>()
+  const totals = new Map<
+    number,
+    {
+      grossAmount: number
+      creditAmount: number
+      chargeCases: number
+      creditCases: number
+    }
+  >()
+
   for (const it of items) {
-    const cur = totals.get(it.receiptId) ?? { amount: 0, cases: 0 }
-    cur.amount += Number(it.pricePerCase) * it.cases
-    cur.cases += it.cases
+    const cur = totals.get(it.receiptId) ?? {
+      grossAmount: 0,
+      creditAmount: 0,
+      chargeCases: 0,
+      creditCases: 0,
+    }
+    const lineTotal = Number(it.pricePerCase) * it.cases
+    const isCredit = it.itemType === "credit"
+
+    if (isCredit) {
+      cur.creditAmount += lineTotal
+      cur.creditCases += it.cases
+    } else {
+      cur.grossAmount += lineTotal
+      cur.chargeCases += it.cases
+    }
+
     totals.set(it.receiptId, cur)
   }
 
-  return rows.map((r) => ({
-    id: r.id,
-    locationId: r.locationId,
-    vendorId: r.vendorId,
-    locationName: r.locationName ?? "Unknown",
-    vendorName: r.vendorName ?? "Unknown",
-    orderDate: r.orderDate,
-    type: (r.type as ReceiptType) || "purchase",
-    creditReason: r.creditReason ?? null,
-    notes: r.notes ?? null,
-    amount: totals.get(r.id)?.amount ?? 0,
-    totalCases: totals.get(r.id)?.cases ?? 0,
-  }))
+  return rows.map((r) => {
+    const t = totals.get(r.id) ?? {
+      grossAmount: 0,
+      creditAmount: 0,
+      chargeCases: 0,
+      creditCases: 0,
+    }
+    const netAmount = t.grossAmount - t.creditAmount
+    const hasCredits = t.creditAmount > 0
+
+    return {
+      id: r.id,
+      locationId: r.locationId,
+      vendorId: r.vendorId,
+      locationName: r.locationName ?? "Unknown",
+      vendorName: r.vendorName ?? "Unknown",
+      orderDate: r.orderDate,
+      type: (r.type as ReceiptType) || (t.grossAmount === 0 && t.creditAmount > 0 ? "credit" : "purchase"),
+      creditReason: r.creditReason ?? null,
+      notes: r.notes ?? null,
+      isPaid: Boolean(r.isPaid),
+      paidAt: r.paidAt ? new Date(r.paidAt) : null,
+      amount: netAmount,
+      grossAmount: t.grossAmount,
+      creditAmount: t.creditAmount,
+      totalCases: t.chargeCases + t.creditCases,
+      chargeCases: t.chargeCases,
+      creditCases: t.creditCases,
+      hasCredits,
+    }
+  })
 }
 
 export async function getReceipt(id: number): Promise<ReceiptDetail | null> {
@@ -122,6 +183,8 @@ export async function getReceipt(id: number): Promise<ReceiptDetail | null> {
       type: receipts.type,
       creditReason: receipts.creditReason,
       notes: receipts.notes,
+      isPaid: receipts.isPaid,
+      paidAt: receipts.paidAt,
     })
     .from(receipts)
     .leftJoin(locations, eq(receipts.locationId, locations.id))
@@ -135,17 +198,19 @@ export async function getReceipt(id: number): Promise<ReceiptDetail | null> {
     .from(receiptItems)
     .where(eq(receiptItems.receiptId, id))
 
-  return {
-    id: row.id,
-    locationId: row.locationId,
-    vendorId: row.vendorId,
-    locationName: row.locationName ?? "Unknown",
-    vendorName: row.vendorName ?? "Unknown",
-    orderDate: row.orderDate,
-    type: (row.type as ReceiptType) || "purchase",
-    creditReason: row.creditReason ?? null,
-    notes: row.notes ?? null,
-    items: items.map((it) => ({
+  let grossAmount = 0
+  let creditAmount = 0
+
+  const mappedItems: ReceiptDetailItem[] = items.map((it) => {
+    const itemType = (it.itemType as LineItemType) || "charge"
+    const lineTotal = Number(it.pricePerCase) * it.cases
+    if (itemType === "credit") {
+      creditAmount += lineTotal
+    } else {
+      grossAmount += lineTotal
+    }
+
+    return {
       id: it.id,
       productId: it.productId,
       productName: it.productName,
@@ -153,8 +218,41 @@ export async function getReceipt(id: number): Promise<ReceiptDetail | null> {
       unit: it.unit,
       cases: it.cases,
       pricePerCase: Number(it.pricePerCase),
-    })),
+      itemType,
+      reason: it.reason ?? null,
+    }
+  })
+
+  return {
+    id: row.id,
+    locationId: row.locationId,
+    vendorId: row.vendorId,
+    locationName: row.locationName ?? "Unknown",
+    vendorName: row.vendorName ?? "Unknown",
+    orderDate: row.orderDate,
+    type: (row.type as ReceiptType) || (grossAmount === 0 && creditAmount > 0 ? "credit" : "purchase"),
+    creditReason: row.creditReason ?? null,
+    notes: row.notes ?? null,
+    isPaid: Boolean(row.isPaid),
+    paidAt: row.paidAt ? new Date(row.paidAt) : null,
+    items: mappedItems,
+    grossAmount,
+    creditAmount,
+    netAmount: grossAmount - creditAmount,
   }
+}
+
+export async function toggleReceiptPaid(id: number, isPaid: boolean) {
+  await db
+    .update(receipts)
+    .set({
+      isPaid,
+      paidAt: isPaid ? new Date() : null,
+    })
+    .where(eq(receipts.id, id))
+
+  revalidatePath("/")
+  revalidatePath(`/receipts/${id}`)
 }
 
 function validateItems(items: ReceiptItemInput[]) {
@@ -173,15 +271,20 @@ export async function createReceipt(input: ReceiptInput) {
   if (!input.orderDate) throw new Error("Order date is required")
   validateItems(input.items)
 
+  const hasOnlyCredits = input.items.every((it) => it.itemType === "credit")
+  const docType = input.type || (hasOnlyCredits ? "credit" : "purchase")
+
   const [receipt] = await db
     .insert(receipts)
     .values({
       locationId: input.locationId,
       vendorId: input.vendorId,
       orderDate: input.orderDate,
-      type: input.type || "purchase",
-      creditReason: input.type === "credit" ? (input.creditReason || "Expired Product") : null,
+      type: docType,
+      creditReason: input.creditReason || null,
       notes: input.notes?.trim() || null,
+      isPaid: Boolean(input.isPaid),
+      paidAt: input.isPaid ? new Date() : null,
     })
     .returning()
 
@@ -194,6 +297,8 @@ export async function createReceipt(input: ReceiptInput) {
       unit: it.unit,
       cases: it.cases,
       pricePerCase: String(it.pricePerCase),
+      itemType: it.itemType || "charge",
+      reason: it.reason?.trim() || (it.itemType === "credit" ? "Expired Product" : null),
     })),
   )
 
@@ -207,15 +312,20 @@ export async function updateReceipt(id: number, input: ReceiptInput) {
   if (!input.orderDate) throw new Error("Order date is required")
   validateItems(input.items)
 
+  const hasOnlyCredits = input.items.every((it) => it.itemType === "credit")
+  const docType = input.type || (hasOnlyCredits ? "credit" : "purchase")
+
   await db
     .update(receipts)
     .set({
       locationId: input.locationId,
       vendorId: input.vendorId,
       orderDate: input.orderDate,
-      type: input.type || "purchase",
-      creditReason: input.type === "credit" ? (input.creditReason || "Expired Product") : null,
+      type: docType,
+      creditReason: input.creditReason || null,
       notes: input.notes?.trim() || null,
+      isPaid: Boolean(input.isPaid),
+      paidAt: input.isPaid ? new Date() : null,
     })
     .where(eq(receipts.id, id))
 
@@ -229,6 +339,8 @@ export async function updateReceipt(id: number, input: ReceiptInput) {
       unit: it.unit,
       cases: it.cases,
       pricePerCase: String(it.pricePerCase),
+      itemType: it.itemType || "charge",
+      reason: it.reason?.trim() || (it.itemType === "credit" ? "Expired Product" : null),
     })),
   )
 

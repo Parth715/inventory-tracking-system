@@ -3,14 +3,20 @@
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { AlertCircle, Package, Plus, RotateCcw, Trash2 } from "lucide-react"
+import {
+  AlertCircle,
+  Package,
+  Plus,
+  RotateCcw,
+  Trash2,
+} from "lucide-react"
 import type { Location, Product, Vendor } from "@/lib/db/schema"
 import {
   createReceipt,
   updateReceipt,
+  type LineItemType,
   type ReceiptDetail,
   type ReceiptItemInput,
-  type ReceiptType,
 } from "@/app/actions/receipts"
 import { formatCurrency, formatPackage, packageSizeToMl } from "@/lib/units"
 import { cn } from "@/lib/utils"
@@ -72,13 +78,6 @@ export function OrderForm({
   const [vendors, setVendors] = useState(initialVendors)
   const [products, setProducts] = useState(initialProducts)
 
-  // Transaction type: purchase vs credit
-  const [type, setType] = useState<ReceiptType>(existing?.type ?? "purchase")
-  const [creditReason, setCreditReason] = useState<string>(
-    existing?.creditReason ?? "Expired Product",
-  )
-  const [notes, setNotes] = useState<string>(existing?.notes ?? "")
-
   const [locationId, setLocationId] = useState(
     existing ? String(existing.locationId) : "",
   )
@@ -86,6 +85,8 @@ export function OrderForm({
     existing ? String(existing.vendorId) : "",
   )
   const [orderDate, setOrderDate] = useState(existing?.orderDate ?? today())
+  const [notes, setNotes] = useState<string>(existing?.notes ?? "")
+  const [isPaid, setIsPaid] = useState<boolean>(existing?.isPaid ?? false)
 
   const [items, setItems] = useState<LineItem[]>(
     existing
@@ -97,11 +98,15 @@ export function OrderForm({
           unit: it.unit,
           cases: it.cases,
           pricePerCase: it.pricePerCase,
+          itemType: it.itemType || "charge",
+          reason: it.reason ?? null,
         }))
       : [],
   )
 
-  // draft line entry
+  // Draft line entry
+  const [draftType, setDraftType] = useState<LineItemType>("charge")
+  const [draftReason, setDraftReason] = useState<string>("Expired Product")
   const [productId, setProductId] = useState("")
   const [cases, setCases] = useState("")
   const [pricePerCase, setPricePerCase] = useState("")
@@ -110,8 +115,6 @@ export function OrderForm({
   const [vendorDialog, setVendorDialog] = useState(false)
   const [productDialog, setProductDialog] = useState(false)
   const [locationDialog, setLocationDialog] = useState(false)
-
-  const isCredit = type === "credit"
 
   const vendorProducts = useMemo(
     () => products.filter((p) => String(p.vendorId) === vendorId),
@@ -122,6 +125,7 @@ export function OrderForm({
     setProductId("")
     setCases("")
     setPricePerCase("")
+    // Keep draftType for rapid sequential entry
   }
 
   function handleVendorChange(v: string) {
@@ -147,18 +151,27 @@ export function OrderForm({
     if (!Number.isFinite(price) || price < 0)
       return toast.error("Enter a valid price/credit amount")
 
+    const isCredit = draftType === "credit"
+
     setItems((prev) => [
       ...prev,
       {
-        key: `new-${Date.now()}`,
+        key: `new-${Date.now()}-${Math.random()}`,
         productId: product.id,
         productName: product.name,
         packageSize: Number(product.packageSize),
         unit: product.unit,
         cases: qty,
         pricePerCase: price,
+        itemType: draftType,
+        reason: isCredit ? draftReason : null,
       },
     ])
+    toast.success(
+      isCredit
+        ? `Added ${qty} cases credit (${draftReason})`
+        : `Added ${qty} cases delivery`,
+    )
     resetDraft()
   }
 
@@ -166,6 +179,7 @@ export function OrderForm({
     setItems((prev) => prev.filter((it) => it.key !== key))
   }
 
+  // Sort items canonically by volume size
   const sortedItems = useMemo(
     () =>
       [...items].sort(
@@ -176,34 +190,46 @@ export function OrderForm({
     [items],
   )
 
-  const totalCases = items.reduce((s, it) => s + it.cases, 0)
-  const grandTotal = items.reduce((s, it) => s + it.cases * it.pricePerCase, 0)
+  // Calculations
+  const chargedItems = items.filter((it) => it.itemType !== "credit")
+  const creditedItems = items.filter((it) => it.itemType === "credit")
+
+  const grossTotal = chargedItems.reduce(
+    (s, it) => s + it.cases * it.pricePerCase,
+    0,
+  )
+  const creditTotal = creditedItems.reduce(
+    (s, it) => s + it.cases * it.pricePerCase,
+    0,
+  )
+  const netGrandTotal = grossTotal - creditTotal
+
+  const chargedCases = chargedItems.reduce((s, it) => s + it.cases, 0)
+  const creditedCases = creditedItems.reduce((s, it) => s + it.cases, 0)
 
   async function handleSave() {
     if (!locationId) return toast.error("Select a location")
     if (!vendorId) return toast.error("Select a vendor")
-    if (items.length === 0)
-      return toast.error(
-        isCredit ? "Add at least one credited item" : "Add at least one item",
-      )
+    if (items.length === 0) return toast.error("Add at least one item to the receipt")
     setSaving(true)
+
     const payload = {
       locationId: Number(locationId),
       vendorId: Number(vendorId),
       orderDate,
-      type,
-      creditReason: isCredit ? creditReason : null,
       notes: notes.trim() || null,
+      isPaid,
       items: items.map(({ key: _key, ...rest }) => rest),
     }
+
     try {
       if (isEdit) {
         await updateReceipt(existing!.id, payload)
-        toast.success(isCredit ? "Credit memo updated" : "Receipt updated")
+        toast.success("Receipt updated")
         router.push(`/receipts/${existing!.id}`)
       } else {
         const id = await createReceipt(payload)
-        toast.success(isCredit ? "Credit memo issued" : "Receipt created")
+        toast.success("Receipt saved")
         router.push(`/receipts/${id}`)
       }
       router.refresh()
@@ -216,56 +242,11 @@ export function OrderForm({
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
       <div className="space-y-6">
-        {/* Type Selector Header */}
-        <Card className="p-4 bg-muted/30">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Document Type
-            </span>
-            <div className="inline-flex rounded-lg border border-border bg-background p-1 shadow-xs">
-              <button
-                type="button"
-                onClick={() => setType("purchase")}
-                className={cn(
-                  "flex items-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-medium transition-colors cursor-pointer",
-                  !isCredit
-                    ? "bg-primary text-primary-foreground shadow-xs"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <Package className="size-3.5" />
-                Purchase Order
-              </button>
-              <button
-                type="button"
-                onClick={() => setType("credit")}
-                className={cn(
-                  "flex items-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-medium transition-colors cursor-pointer",
-                  isCredit
-                    ? "bg-amber-600 text-white shadow-xs dark:bg-amber-500"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <RotateCcw className="size-3.5" />
-                Credit Memo (Expired / Return)
-              </button>
-            </div>
-          </div>
-        </Card>
-
-        {/* Order / Credit Header */}
+        {/* Order Details Header */}
         <Card className="p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              {isCredit ? "Credit Memo Details" : "Order Details"}
-            </h2>
-            {isCredit && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
-                <AlertCircle className="size-3" />
-                Credit for Vendor Pickup / Expired
-              </span>
-            )}
-          </div>
+          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Receipt Details
+          </h2>
 
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-2">
@@ -301,9 +282,7 @@ export function OrderForm({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="order-date">
-                {isCredit ? "Credit / Pickup Date" : "Order Date"}
-              </Label>
+              <Label htmlFor="order-date">Date</Label>
               <Input
                 id="order-date"
                 type="date"
@@ -313,167 +292,253 @@ export function OrderForm({
             </div>
           </div>
 
-          {/* Credit Memo specific inputs */}
-          {isCredit && (
-            <div className="mt-4 grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="credit-reason">Credit Reason</Label>
-                <Select value={creditReason} onValueChange={setCreditReason}>
-                  <SelectTrigger id="credit-reason" className="w-full">
-                    <SelectValue placeholder="Select reason" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CREDIT_REASONS.map((r) => (
-                      <SelectItem key={r} value={r}>
-                        {r}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="credit-notes">
-                  Driver Slip # / Notes{" "}
-                  <span className="text-xs text-muted-foreground">(Optional)</span>
-                </Label>
-                <Input
-                  id="credit-notes"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="e.g. Driver signed slip #48291"
-                />
-              </div>
+          <div className="mt-4 grid gap-4 border-t border-border pt-4 sm:grid-cols-[1fr_auto] sm:items-end">
+            <div className="space-y-2">
+              <Label htmlFor="receipt-notes">
+                Driver Slip # / Notes{" "}
+                <span className="text-xs text-muted-foreground">(Optional)</span>
+              </Label>
+              <Input
+                id="receipt-notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="e.g. Delivery Driver slip #94812, 2 cases damaged return"
+              />
             </div>
-          )}
+
+            <div className="flex items-center gap-2 pb-2">
+              <input
+                id="is-paid-toggle"
+                type="checkbox"
+                checked={isPaid}
+                onChange={(e) => setIsPaid(e.target.checked)}
+                className="size-4 rounded border-border text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+              />
+              <Label
+                htmlFor="is-paid-toggle"
+                className="cursor-pointer font-medium text-sm text-foreground select-none"
+              >
+                Mark as Paid (COD / Check)
+              </Label>
+            </div>
+          </div>
         </Card>
 
-        {/* Add item */}
+        {/* Add Items Card */}
         <Card className="p-5">
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            {isCredit ? "Add Expired / Credited Items" : "Add Items"}
-          </h2>
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Add Products & Credits
+            </h2>
+            <div className="inline-flex rounded-lg border border-border bg-muted/40 p-1 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setDraftType("charge")}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors cursor-pointer",
+                  draftType === "charge"
+                    ? "bg-background text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Package className="size-3.5 text-blue-600 dark:text-blue-400" />
+                📦 Delivery (Charge)
+              </button>
+              <button
+                type="button"
+                onClick={() => setDraftType("credit")}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors cursor-pointer",
+                  draftType === "credit"
+                    ? "bg-amber-600 text-white shadow-xs dark:bg-amber-500"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <RotateCcw className="size-3.5" />
+                🔄 Credit (Expired / Return)
+              </button>
+            </div>
+          </div>
+
           {!vendorId ? (
             <p className="rounded-md bg-muted/50 px-4 py-6 text-center text-sm text-muted-foreground">
-              Select a vendor to choose products.
+              Select a vendor above to choose products and enter delivery charges or expired returns.
             </p>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-[1fr_120px_140px_auto] sm:items-end">
-              <div className="space-y-2">
-                <Label>Product</Label>
-                <SearchableSelect
-                  options={vendorProducts.map((p) => ({
-                    value: String(p.id),
-                    label: p.name,
-                    hint: formatPackage(Number(p.packageSize), p.unit),
-                  }))}
-                  value={productId}
-                  onChange={handleProductChange}
-                  placeholder="Select product"
-                  searchPlaceholder="Search products..."
-                  emptyText="No products for this vendor."
-                  addLabel="Add new product"
-                  onAddNew={() => setProductDialog(true)}
-                />
+            <div className="space-y-4">
+              {draftType === "credit" && (
+                <div className="flex items-center gap-3 rounded-md bg-amber-500/10 border border-amber-500/20 p-3 text-xs text-amber-800 dark:text-amber-300">
+                  <AlertCircle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <div className="flex-1 flex flex-col sm:flex-row sm:items-center gap-2">
+                    <span className="font-semibold">Credit Reason:</span>
+                    <Select value={draftReason} onValueChange={setDraftReason}>
+                      <SelectTrigger className="h-8 bg-background text-foreground w-full sm:w-60">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CREDIT_REASONS.map((r) => (
+                          <SelectItem key={r} value={r}>
+                            {r}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid gap-4 sm:grid-cols-[1fr_110px_130px_auto] sm:items-end">
+                <div className="space-y-2">
+                  <Label>
+                    {draftType === "credit" ? "Credited Product" : "Delivered Product"}
+                  </Label>
+                  <SearchableSelect
+                    options={vendorProducts.map((p) => ({
+                      value: String(p.id),
+                      label: p.name,
+                      hint: formatPackage(Number(p.packageSize), p.unit),
+                    }))}
+                    value={productId}
+                    onChange={handleProductChange}
+                    placeholder="Select product"
+                    searchPlaceholder="Search products..."
+                    emptyText="No products for this vendor."
+                    addLabel="Add new product"
+                    onAddNew={() => setProductDialog(true)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="cases">
+                    {draftType === "credit" ? "Cases Ret." : "Cases"}
+                  </Label>
+                  <Input
+                    id="cases"
+                    type="number"
+                    inputMode="numeric"
+                    min="1"
+                    value={cases}
+                    onChange={(e) => setCases(e.target.value)}
+                    placeholder="0"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="price">
+                    {draftType === "credit" ? "Credit / Case" : "Price / Case"}
+                  </Label>
+                  <Input
+                    id="price"
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step="0.01"
+                    value={pricePerCase}
+                    onChange={(e) => setPricePerCase(e.target.value)}
+                    placeholder="0.00"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                        e.preventDefault()
+                        addItem()
+                      }
+                    }}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  onClick={addItem}
+                  className={cn(
+                    "sm:mb-0",
+                    draftType === "credit"
+                      ? "bg-amber-600 hover:bg-amber-700 text-white dark:bg-amber-600 dark:hover:bg-amber-500"
+                      : "",
+                  )}
+                >
+                  <Plus className="size-4" />
+                  {draftType === "credit" ? "Add Credit" : "Add Item"}
+                </Button>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="cases">
-                  {isCredit ? "Cases Ret." : "Cases"}
-                </Label>
-                <Input
-                  id="cases"
-                  type="number"
-                  inputMode="numeric"
-                  min="1"
-                  value={cases}
-                  onChange={(e) => setCases(e.target.value)}
-                  placeholder="0"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="price">
-                  {isCredit ? "Credit / Case" : "Price / Case"}
-                </Label>
-                <Input
-                  id="price"
-                  type="number"
-                  inputMode="decimal"
-                  min="0"
-                  step="0.01"
-                  value={pricePerCase}
-                  onChange={(e) => setPricePerCase(e.target.value)}
-                  placeholder="0.00"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-                      e.preventDefault()
-                      addItem()
-                    }
-                  }}
-                />
-              </div>
-              <Button type="button" onClick={addItem} className="sm:mb-0">
-                <Plus className="size-4" />
-                {isCredit ? "Add Credit" : "Add"}
-              </Button>
             </div>
           )}
 
-          {/* Line items */}
+          {/* Line items table */}
           {sortedItems.length > 0 && (
-            <div className="mt-5 overflow-hidden rounded-lg border border-border">
+            <div className="mt-6 overflow-hidden rounded-lg border border-border">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/50 hover:bg-muted/50">
-                    <TableHead>Item</TableHead>
-                    <TableHead className="text-right">
-                      {isCredit ? "Cases Returned" : "Cases"}
-                    </TableHead>
-                    <TableHead className="text-right">
-                      {isCredit ? "Credit/Case" : "Price/Case"}
-                    </TableHead>
-                    <TableHead className="text-right">
-                      {isCredit ? "Credit Total" : "Total"}
-                    </TableHead>
+                    <TableHead className="w-28">Type</TableHead>
+                    <TableHead>Product</TableHead>
+                    <TableHead className="text-right">Cases</TableHead>
+                    <TableHead className="text-right">Price / Case</TableHead>
+                    <TableHead className="text-right">Line Total</TableHead>
                     <TableHead className="w-10" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sortedItems.map((it) => (
-                    <TableRow key={it.key}>
-                      <TableCell className="font-medium">
-                        {it.productName}
-                        <span className="ml-1.5 text-xs text-muted-foreground">
-                          ({formatPackage(it.packageSize, it.unit)})
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right font-mono tabular-nums">
-                        {it.cases}
-                      </TableCell>
-                      <TableCell className="text-right font-mono tabular-nums">
-                        {formatCurrency(it.pricePerCase)}
-                      </TableCell>
-                      <TableCell
+                  {sortedItems.map((it) => {
+                    const isItemCredit = it.itemType === "credit"
+                    return (
+                      <TableRow
+                        key={it.key}
                         className={cn(
-                          "text-right font-mono font-medium tabular-nums",
-                          isCredit && "text-amber-600 dark:text-amber-400",
+                          isItemCredit && "bg-amber-500/5 hover:bg-amber-500/10",
                         )}
                       >
-                        {isCredit ? "-" : ""}
-                        {formatCurrency(it.cases * it.pricePerCase)}
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-8 text-muted-foreground hover:text-destructive"
-                          onClick={() => removeItem(it.key)}
+                        <TableCell>
+                          {isItemCredit ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
+                              <RotateCcw className="size-3" />
+                              Credit
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                              <Package className="size-3" />
+                              Charge
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          <span>{it.productName}</span>
+                          <span className="ml-1.5 text-xs text-muted-foreground">
+                            ({formatPackage(it.packageSize, it.unit)})
+                          </span>
+                          {isItemCredit && it.reason && (
+                            <span className="block text-xs text-amber-700/80 dark:text-amber-400/80 font-normal">
+                              Reason: {it.reason}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right font-mono tabular-nums">
+                          {it.cases}
+                        </TableCell>
+                        <TableCell className="text-right font-mono tabular-nums">
+                          {formatCurrency(it.pricePerCase)}
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "text-right font-mono font-medium tabular-nums",
+                            isItemCredit
+                              ? "text-amber-700 dark:text-amber-400"
+                              : "text-foreground",
+                          )}
                         >
-                          <Trash2 className="size-4" />
-                          <span className="sr-only">Remove item</span>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                          {isItemCredit ? "-" : ""}
+                          {formatCurrency(it.cases * it.pricePerCase)}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="size-8 text-muted-foreground hover:text-destructive"
+                            onClick={() => removeItem(it.key)}
+                          >
+                            <Trash2 className="size-4" />
+                            <span className="sr-only">Remove item</span>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -481,76 +546,68 @@ export function OrderForm({
         </Card>
       </div>
 
-      {/* Summary */}
+      {/* Summary Sidebar */}
       <div className="lg:sticky lg:top-24 lg:self-start">
         <Card className="p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              {isCredit ? "Credit Summary" : "Order Summary"}
-            </h2>
-            {isCredit && (
-              <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
-                CREDIT MEMO
-              </span>
-            )}
-          </div>
+          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Receipt Financials
+          </h2>
           <dl className="space-y-3 text-sm">
             <div className="flex items-center justify-between">
-              <dt className="text-muted-foreground">
-                {isCredit ? "Credited items" : "Line items"}
-              </dt>
+              <dt className="text-muted-foreground">Total Line Items</dt>
               <dd className="font-medium tabular-nums">{items.length}</dd>
             </div>
             <div className="flex items-center justify-between">
-              <dt className="text-muted-foreground">
-                {isCredit ? "Total cases returned" : "Total cases"}
-              </dt>
+              <dt className="text-muted-foreground">Delivered Cases</dt>
               <dd className="font-mono font-medium tabular-nums">
-                {totalCases}
+                {chargedCases}
               </dd>
             </div>
-            {isCredit && creditReason && (
-              <div className="flex items-center justify-between border-t border-border pt-3 text-xs">
-                <dt className="text-muted-foreground">Reason</dt>
-                <dd className="font-medium text-amber-700 dark:text-amber-300">
-                  {creditReason}
+            {creditedCases > 0 && (
+              <div className="flex items-center justify-between text-amber-700 dark:text-amber-400">
+                <dt>Returned Cases (Credits)</dt>
+                <dd className="font-mono font-medium tabular-nums">
+                  {creditedCases}
                 </dd>
               </div>
             )}
+
+            <div className="border-t border-border pt-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <dt className="text-muted-foreground">Delivered Subtotal</dt>
+                <dd className="font-mono font-medium tabular-nums">
+                  {formatCurrency(grossTotal)}
+                </dd>
+              </div>
+              {creditTotal > 0 && (
+                <div className="flex items-center justify-between text-amber-700 dark:text-amber-400">
+                  <dt>Expired / Return Credits</dt>
+                  <dd className="font-mono font-medium tabular-nums">
+                    -{formatCurrency(creditTotal)}
+                  </dd>
+                </div>
+              )}
+            </div>
+
             <div className="flex items-center justify-between border-t border-border pt-3">
-              <dt className="font-semibold">
-                {isCredit ? "Total Credit Issued" : "Grand total"}
-              </dt>
-              <dd
-                className={cn(
-                  "font-mono text-lg font-semibold tabular-nums",
-                  isCredit
-                    ? "text-amber-600 dark:text-amber-400"
-                    : "text-foreground",
-                )}
-              >
-                {isCredit ? "-" : ""}
-                {formatCurrency(grandTotal)}
+              <dt className="font-semibold text-base">Net Grand Total</dt>
+              <dd className="font-mono text-xl font-bold tabular-nums text-foreground">
+                {netGrandTotal < 0 ? "-" : ""}
+                {formatCurrency(Math.abs(netGrandTotal))}
               </dd>
             </div>
           </dl>
+
           <Button
-            className={cn(
-              "mt-5 w-full",
-              isCredit && "bg-amber-600 hover:bg-amber-700 text-white dark:bg-amber-600 dark:hover:bg-amber-500",
-            )}
+            className="mt-6 w-full"
             onClick={handleSave}
             disabled={saving}
           >
             {saving
               ? "Saving..."
               : isEdit
-                ? isCredit
-                  ? "Save credit memo"
-                  : "Save changes"
-                : isCredit
-                  ? "Issue credit memo"
-                  : "Create receipt"}
+                ? "Save Changes"
+                : "Create Receipt / Invoice"}
           </Button>
           <Button
             variant="ghost"

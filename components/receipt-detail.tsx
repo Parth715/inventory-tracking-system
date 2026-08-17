@@ -6,7 +6,12 @@ import Link from "next/link"
 import { ArrowLeft, Pencil, Printer, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import type { Location, Product, Vendor } from "@/lib/db/schema"
-import { deleteReceipt, type ReceiptDetail } from "@/app/actions/receipts"
+import {
+  deleteReceipt,
+  toggleReceiptPaid,
+  type ReceiptDetail,
+} from "@/app/actions/receipts"
+import { cn } from "@/lib/utils"
 import { PrintedReceipt } from "@/components/printed-receipt"
 import { OrderForm } from "@/components/order-form"
 import { Button } from "@/components/ui/button"
@@ -82,6 +87,25 @@ export function ReceiptDetailView({
           Back to receipts & credits
         </Link>
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant={receipt.isPaid ? "outline" : "default"}
+            size="sm"
+            className={cn(
+              "cursor-pointer",
+              !receipt.isPaid && "bg-emerald-600 hover:bg-emerald-700 text-white",
+            )}
+            onClick={async () => {
+              try {
+                await toggleReceiptPaid(receipt.id, !receipt.isPaid)
+                toast.success(receipt.isPaid ? "Marked as Unpaid" : "Marked as Paid")
+                router.refresh()
+              } catch (err) {
+                toast.error("Failed to update payment status")
+              }
+            }}
+          >
+            {receipt.isPaid ? "Mark as Unpaid" : "✓ Mark as Paid"}
+          </Button>
           <Button variant="outline" size="sm" onClick={() => window.print()}>
             <Printer className="size-4" />
             Print / Download

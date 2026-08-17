@@ -1,4 +1,5 @@
 import {
+  boolean,
   date,
   integer,
   numeric,
@@ -39,6 +40,8 @@ export const receipts = pgTable("receipts", {
   type: text("type").notNull().default("purchase"), // 'purchase' | 'credit'
   creditReason: text("credit_reason"), // e.g. 'Expired Product', 'Damaged', etc.
   notes: text("notes"),
+  isPaid: boolean("is_paid").notNull().default(false),
+  paidAt: timestamp("paid_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 })
 
@@ -51,6 +54,8 @@ export const receiptItems = pgTable("receipt_items", {
   unit: text("unit").notNull().default("oz"),
   cases: integer("cases").notNull().default(0),
   pricePerCase: numeric("price_per_case").notNull().default("0"),
+  itemType: text("item_type").notNull().default("charge"), // 'charge' | 'credit'
+  reason: text("reason"), // e.g. 'Expired Product', 'Damaged', etc.
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 })
 

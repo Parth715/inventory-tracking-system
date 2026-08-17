@@ -19,8 +19,20 @@ async function migrate() {
 
       ALTER TABLE receipts 
       ADD COLUMN IF NOT EXISTS notes text;
+
+      ALTER TABLE receipts 
+      ADD COLUMN IF NOT EXISTS is_paid boolean NOT NULL DEFAULT false;
+
+      ALTER TABLE receipts 
+      ADD COLUMN IF NOT EXISTS paid_at timestamp with time zone;
+
+      ALTER TABLE receipt_items 
+      ADD COLUMN IF NOT EXISTS item_type text NOT NULL DEFAULT 'charge';
+
+      ALTER TABLE receipt_items 
+      ADD COLUMN IF NOT EXISTS reason text;
     `)
-    console.log("✅ Migration applied successfully! (type, credit_reason, notes columns ready)")
+    console.log("✅ Migration applied successfully! (receipts is_paid & paid_at ready)")
   } finally {
     client.release()
     await pool.end()
