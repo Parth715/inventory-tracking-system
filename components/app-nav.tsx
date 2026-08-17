@@ -4,10 +4,11 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Package, Plus, Receipt, Store, MapPin } from "lucide-react"
+import { BarChart3, Package, Plus, Receipt, Store, MapPin } from "lucide-react"
 
 const links = [
   { href: "/", label: "Receipts", icon: Receipt, exact: true },
+  { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/vendors", label: "Vendors", icon: Store },
   { href: "/products", label: "Products", icon: Package },
   { href: "/locations", label: "Locations", icon: MapPin },

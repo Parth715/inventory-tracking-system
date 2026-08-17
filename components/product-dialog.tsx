@@ -1,10 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { toast } from "sonner"
 import { createProduct, updateProduct } from "@/app/actions/catalog"
 import type { Product, Vendor } from "@/lib/db/schema"
-import { UNIT_OPTIONS } from "@/lib/units"
+import { UNIT_OPTIONS, formatCurrency } from "@/lib/units"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -54,7 +55,28 @@ export function ProductDialog({
   const [defaultCasePrice, setDefaultCasePrice] = useState(
     product?.defaultCasePrice != null ? String(product.defaultCasePrice) : "",
   )
+  const [retailPrice, setRetailPrice] = useState(
+    product?.retailPrice != null ? String(product.retailPrice) : "",
+  )
   const [saving, setSaving] = useState(false)
+
+  // Live margin calculation
+  const marginCalc = useMemo(() => {
+    const caseP = Number(defaultCasePrice)
+    const units = Number(caseCount)
+    const retail = Number(retailPrice)
+
+    if (!caseP || !units || units <= 0) return null
+
+    const unitCost = caseP / units
+    const hasRetail = retail > 0
+
+    return {
+      unitCost,
+      unitProfit: hasRetail ? retail - unitCost : null,
+      marginPct: hasRetail ? ((retail - unitCost) / retail) * 100 : null,
+    }
+  }, [defaultCasePrice, caseCount, retailPrice])
 
   function reset() {
     setName(product?.name ?? "")
@@ -66,6 +88,9 @@ export function ProductDialog({
     setCaseCount(product ? String(product.caseCount) : "")
     setDefaultCasePrice(
       product?.defaultCasePrice != null ? String(product.defaultCasePrice) : "",
+    )
+    setRetailPrice(
+      product?.retailPrice != null ? String(product.retailPrice) : "",
     )
   }
 
@@ -85,11 +110,18 @@ export function ProductDialog({
       unit,
       caseCount: Number(caseCount) || 0,
       defaultCasePrice: defaultCasePrice === "" ? null : Number(defaultCasePrice),
+      retailPrice: retailPrice === "" ? null : Number(retailPrice),
     }
     try {
       const saved = isEdit
         ? (await updateProduct(product!.id, input),
-          { ...product!, ...input, packageSize: String(input.packageSize), defaultCasePrice: input.defaultCasePrice == null ? null : String(input.defaultCasePrice) })
+          {
+            ...product!,
+            ...input,
+            packageSize: String(input.packageSize),
+            defaultCasePrice: input.defaultCasePrice == null ? null : String(input.defaultCasePrice),
+            retailPrice: input.retailPrice == null ? null : String(input.retailPrice),
+          })
         : await createProduct(input)
       toast.success(isEdit ? "Product updated" : `Added ${input.name}`)
       onSaved?.(saved as Product)
@@ -201,6 +233,75 @@ export function ProductDialog({
               />
             </div>
           </div>
+
+          {/* Retail Price & Margin Calculator */}
+          <div className="space-y-2">
+            <Label htmlFor="retail-price">
+              Retail price (SRP) per unit{" "}
+              <span className="text-xs text-muted-foreground">(Optional)</span>
+            </Label>
+            <Input
+              id="retail-price"
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="0.01"
+              value={retailPrice}
+              onChange={(e) => setRetailPrice(e.target.value)}
+              placeholder="e.g. 2.49"
+            />
+          </div>
+
+          {/* Live Margin Preview */}
+          {marginCalc && (
+            <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1.5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                💰 Margin Calculator
+              </p>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div>
+                  <p className="text-[11px] text-muted-foreground">Unit Cost</p>
+                  <p className="text-sm font-bold font-mono tabular-nums text-foreground">
+                    {formatCurrency(marginCalc.unitCost)}
+                  </p>
+                </div>
+                {marginCalc.unitProfit != null && (
+                  <div>
+                    <p className="text-[11px] text-muted-foreground">Profit/Unit</p>
+                    <p
+                      className={cn(
+                        "text-sm font-bold font-mono tabular-nums",
+                        marginCalc.unitProfit > 0
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : "text-rose-600 dark:text-rose-400",
+                      )}
+                    >
+                      {formatCurrency(marginCalc.unitProfit)}
+                    </p>
+                  </div>
+                )}
+                {marginCalc.marginPct != null && (
+                  <div>
+                    <p className="text-[11px] text-muted-foreground">Margin</p>
+                    <p className="text-sm font-bold font-mono tabular-nums">
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold",
+                          marginCalc.marginPct >= 40
+                            ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                            : marginCalc.marginPct >= 25
+                              ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                              : "bg-gray-500/15 text-gray-700 dark:text-gray-400",
+                        )}
+                      >
+                        {marginCalc.marginPct.toFixed(1)}%
+                      </span>
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         <DialogFooter>

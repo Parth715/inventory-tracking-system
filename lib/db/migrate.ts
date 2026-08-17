@@ -31,8 +31,11 @@ async function migrate() {
 
       ALTER TABLE receipt_items 
       ADD COLUMN IF NOT EXISTS reason text;
+
+      ALTER TABLE products
+      ADD COLUMN IF NOT EXISTS retail_price numeric;
     `)
-    console.log("✅ Migration applied successfully! (receipts is_paid & paid_at ready)")
+    console.log("✅ Migration applied successfully! (all columns ready)")
   } finally {
     client.release()
     await pool.end()

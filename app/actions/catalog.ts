@@ -75,6 +75,7 @@ export type ProductInput = {
   unit: string
   caseCount: number
   defaultCasePrice: number | null
+  retailPrice: number | null
 }
 
 export async function getProducts() {
@@ -103,6 +104,8 @@ export async function createProduct(input: ProductInput) {
       caseCount: input.caseCount ?? 0,
       defaultCasePrice:
         input.defaultCasePrice == null ? null : String(input.defaultCasePrice),
+      retailPrice:
+        input.retailPrice == null ? null : String(input.retailPrice),
     })
     .returning()
   revalidatePath("/products")
@@ -123,6 +126,8 @@ export async function updateProduct(id: number, input: ProductInput) {
       caseCount: input.caseCount ?? 0,
       defaultCasePrice:
         input.defaultCasePrice == null ? null : String(input.defaultCasePrice),
+      retailPrice:
+        input.retailPrice == null ? null : String(input.retailPrice),
     })
     .where(eq(products.id, id))
   revalidatePath("/products")
