@@ -36,6 +36,7 @@ export const products = pgTable("products", {
 export const receipts = pgTable("receipts", {
   id: serial("id").primaryKey(),
   locationId: integer("location_id").notNull(),
+  payableToLocationId: integer("payable_to_location_id"),
   vendorId: integer("vendor_id").notNull(),
   orderDate: date("order_date").notNull(),
   type: text("type").notNull().default("purchase"), // 'purchase' | 'credit'

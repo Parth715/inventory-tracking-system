@@ -81,6 +81,9 @@ export function OrderForm({
   const [locationId, setLocationId] = useState(
     existing ? String(existing.locationId) : "",
   )
+  const [payableToLocationId, setPayableToLocationId] = useState(
+    existing?.payableToLocationId ? String(existing.payableToLocationId) : "",
+  )
   const [vendorId, setVendorId] = useState(
     existing ? String(existing.vendorId) : "",
   )
@@ -215,6 +218,7 @@ export function OrderForm({
 
     const payload = {
       locationId: Number(locationId),
+      payableToLocationId: payableToLocationId ? Number(payableToLocationId) : null,
       vendorId: Number(vendorId),
       orderDate,
       notes: notes.trim() || null,
@@ -245,12 +249,15 @@ export function OrderForm({
         {/* Order Details Header */}
         <Card className="p-5">
           <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Receipt Details
+            Receipt Details & Locations
           </h2>
 
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-2">
-              <Label>Location</Label>
+              <Label className="flex items-center gap-1">
+                <span>Receiving Location</span>
+                <span className="text-xs text-muted-foreground">(Billed To)</span>
+              </Label>
               <SearchableSelect
                 options={locations.map((l) => ({
                   value: String(l.id),
@@ -258,7 +265,29 @@ export function OrderForm({
                 }))}
                 value={locationId}
                 onChange={setLocationId}
-                placeholder="Select location"
+                placeholder="Select billed store"
+                searchPlaceholder="Search locations..."
+                emptyText="No locations."
+                addLabel="Add new location"
+                onAddNew={() => setLocationDialog(true)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1">
+                <span>Payable To</span>
+                <span className="text-xs text-muted-foreground">(Ordering Store)</span>
+              </Label>
+              <SearchableSelect
+                options={[
+                  { value: "", label: "None / Same Store" },
+                  ...locations.map((l) => ({
+                    value: String(l.id),
+                    label: l.name,
+                  })),
+                ]}
+                value={payableToLocationId}
+                onChange={setPayableToLocationId}
+                placeholder="Select store owed"
                 searchPlaceholder="Search locations..."
                 emptyText="No locations."
                 addLabel="Add new location"

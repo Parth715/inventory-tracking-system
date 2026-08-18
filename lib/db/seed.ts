@@ -23,17 +23,18 @@ async function seed() {
   console.log("🌱 Seeding database...")
 
   // ── Locations ──────────────────────────────────────────────────────────
-  const [loc1, loc2, loc3] = await db
+  const createdLocations = await db
     .insert(locations)
     .values([
-      { name: "Location 1" },
-      { name: "Location 2" },
-      { name: "Location 3" },
+      { name: "Sharonville FoodMart" },
+      { name: "Sharonville Liquor" },
+      { name: "Sharonville Shell" },
+      { name: "Springdale Shell" },
     ])
     .onConflictDoNothing()
     .returning()
 
-  console.log(`  ✓ Locations: ${[loc1, loc2, loc3].filter(Boolean).length} created`)
+  console.log(`  ✓ Locations: ${createdLocations.length} created`)
 
   // ── Vendors ────────────────────────────────────────────────────────────
   const insertedVendors = await db

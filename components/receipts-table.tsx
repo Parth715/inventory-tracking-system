@@ -16,6 +16,9 @@ import {
   Plus,
   RotateCcw,
   Search,
+  Scale,
+  ArrowRight,
+  Layers,
 } from "lucide-react"
 import {
   toggleReceiptPaid,
@@ -25,6 +28,7 @@ import { formatCurrency, formatDate } from "@/lib/units"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { CombinedReceiptDialog } from "@/components/combined-receipt-dialog"
 import {
   Table,
   TableBody,
@@ -41,7 +45,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
-type SortKey = "locationName" | "vendorName" | "orderDate" | "amount" | "isPaid"
+type SortKey = "locationName" | "payableToLocationName" | "vendorName" | "orderDate" | "amount" | "isPaid"
 type SortDir = "asc" | "desc"
 type QuickFilter = "all" | "unpaid" | "paid" | "has-credits"
 
@@ -65,12 +69,17 @@ export function ReceiptsTable({
 
   const [query, setQuery] = useState("")
   const [locationFilter, setLocationFilter] = useState("all")
+  const [payableToFilter, setPayableToFilter] = useState("all")
   const [vendorFilter, setVendorFilter] = useState("all")
   const [paymentFilter, setPaymentFilter] = useState<"all" | "unpaid" | "paid">("all")
   const [creditFilter, setCreditFilter] = useState<"all" | "has-credits" | "orders-only">("all")
   const [quickFilter, setQuickFilter] = useState<QuickFilter>("all")
   const [sortKey, setSortKey] = useState<SortKey>("orderDate")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
+
+  // Selection & Combine Dialog state
+  const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [combineOpen, setCombineOpen] = useState(false)
 
   function handleQuickFilter(filter: QuickFilter) {
     setQuickFilter(filter)
@@ -96,6 +105,21 @@ export function ReceiptsTable({
       setSortKey(key)
       setSortDir(key === "orderDate" || key === "amount" ? "desc" : "asc")
     }
+  }
+
+  function toggleSelectReceipt(e: React.MouseEvent, id: number) {
+    e.stopPropagation()
+    setSelectedIds((prev) => {
+      if (prev.includes(id)) {
+        return prev.filter((x) => x !== id)
+      } else {
+        if (prev.length >= 2) {
+          // Keep only the most recent two
+          return [prev[1], id]
+        }
+        return [...prev, id]
+      }
+    })
   }
 
   async function handleTogglePaid(e: React.MouseEvent, id: number, currentPaid: boolean) {
@@ -135,11 +159,14 @@ export function ReceiptsTable({
       if (creditFilter === "orders-only" && r.hasCredits) return false
       if (locationFilter !== "all" && String(r.locationId) !== locationFilter)
         return false
+      if (payableToFilter !== "all" && String(r.payableToLocationId) !== payableToFilter)
+        return false
       if (vendorFilter !== "all" && String(r.vendorId) !== vendorFilter)
         return false
       if (!q) return true
       return (
         r.locationName.toLowerCase().includes(q) ||
+        (r.payableToLocationName && r.payableToLocationName.toLowerCase().includes(q)) ||
         r.vendorName.toLowerCase().includes(q) ||
         formatDate(r.orderDate).toLowerCase().includes(q) ||
         `#${r.id}`.includes(q) ||
@@ -148,77 +175,120 @@ export function ReceiptsTable({
       )
     })
 
-    rows = [...rows].sort((a, b) => {
-      let cmp = 0
-      if (sortKey === "amount") {
-        cmp = a.amount - b.amount
-      } else if (sortKey === "orderDate") {
-        cmp = a.orderDate.localeCompare(b.orderDate)
+    rows.sort((a, b) => {
+      let av: string | number = ""
+      let bv: string | number = ""
+      if (sortKey === "orderDate") {
+        av = a.orderDate
+        bv = b.orderDate
+      } else if (sortKey === "amount") {
+        av = a.amount
+        bv = b.amount
       } else if (sortKey === "isPaid") {
-        cmp = Number(a.isPaid) - Number(b.isPaid)
+        av = a.isPaid ? 1 : 0
+        bv = b.isPaid ? 1 : 0
+      } else if (sortKey === "payableToLocationName") {
+        av = a.payableToLocationName || ""
+        bv = b.payableToLocationName || ""
       } else {
-        cmp = a[sortKey].localeCompare(b[sortKey])
+        av = (a[sortKey] ?? "").toString().toLowerCase()
+        bv = (b[sortKey] ?? "").toString().toLowerCase()
       }
-      return sortDir === "asc" ? cmp : -cmp
+
+      if (av < bv) return sortDir === "asc" ? -1 : 1
+      if (av > bv) return sortDir === "asc" ? 1 : -1
+      return b.id - a.id
     })
+
     return rows
-  }, [receipts, query, locationFilter, vendorFilter, paymentFilter, creditFilter, sortKey, sortDir])
-
-  const totalGross = filtered.reduce((sum, r) => sum + r.grossAmount, 0)
-  const totalCredits = filtered.reduce((sum, r) => sum + r.creditAmount, 0)
-  const netSpend = totalGross - totalCredits
-  const totalCases = filtered.reduce((sum, r) => sum + r.totalCases, 0)
-
-  const unpaidCount = receipts.filter((r) => !r.isPaid).length
-  const unpaidTotal = receipts
-    .filter((r) => !r.isPaid)
-    .reduce((sum, r) => sum + r.amount, 0)
+  }, [
+    receipts,
+    query,
+    locationFilter,
+    payableToFilter,
+    vendorFilter,
+    paymentFilter,
+    creditFilter,
+    sortKey,
+    sortDir,
+  ])
 
   function exportCSV() {
     const headers = [
-      "Receipt ID",
-      "Paid",
-      "Location",
+      "ID",
+      "Billed Location",
+      "Payable To",
       "Vendor",
       "Date",
-      "Cases",
-      "Gross Delivered",
+      "Gross Total",
       "Credits",
-      "Net Total",
+      "Net Amount",
+      "Status",
       "Notes",
     ]
-
-    const rows = filtered.map((r) => [
-      `#${r.id}`,
-      r.isPaid ? "PAID" : "UNPAID",
+    const csvRows = filtered.map((r) => [
+      r.id,
       `"${r.locationName.replace(/"/g, '""')}"`,
+      `"${(r.payableToLocationName || "").replace(/"/g, '""')}"`,
       `"${r.vendorName.replace(/"/g, '""')}"`,
       r.orderDate,
-      r.totalCases,
       r.grossAmount.toFixed(2),
       r.creditAmount.toFixed(2),
       r.amount.toFixed(2),
-      `"${(r.notes || "").replace(/"/g, '""')}"`,
+      r.isPaid ? "Paid" : "Unpaid",
+      `"${(r.notes ?? "").replace(/"/g, '""')}"`,
     ])
 
     const csvContent =
       "data:text/csv;charset=utf-8," +
-      [headers.join(","), ...rows.map((e) => e.join(","))].join("\n")
-
+      [headers.join(","), ...csvRows.map((e) => e.join(","))].join("\n")
     const encodedUri = encodeURI(csvContent)
     const link = document.createElement("a")
     link.setAttribute("href", encodedUri)
-    link.setAttribute("download", `orders_receipts_${new Date().toISOString().slice(0, 10)}.csv`)
+    link.setAttribute("download", `receipts_export_${new Date().toISOString().slice(0, 10)}.csv`)
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
-    toast.success("CSV export downloaded")
   }
+
+  const unpaidCount = receipts.filter((r) => !r.isPaid).length
 
   return (
     <div className="space-y-4">
-      {/* Quick Filter Chips & Export Button */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      {/* Top Banner for 2 Selected Receipts to Combine */}
+      {selectedIds.length === 2 && (
+        <div className="animate-in fade-in slide-in-from-top-2 duration-200 flex flex-col sm:flex-row items-center justify-between gap-3 rounded-lg border-2 border-primary/40 bg-primary/10 p-3 text-sm shadow-sm">
+          <div className="flex items-center gap-2 font-medium text-foreground">
+            <Scale className="size-4 text-primary shrink-0" />
+            <span>
+              2 Receipts Selected: <span className="font-mono font-bold">#{selectedIds[0]}</span> and <span className="font-mono font-bold">#{selectedIds[1]}</span>
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="xs"
+              onClick={() => setSelectedIds([])}
+              className="cursor-pointer text-xs"
+            >
+              Clear Selection
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => setCombineOpen(true)}
+              className="cursor-pointer shadow-xs bg-primary text-primary-foreground font-semibold text-xs"
+            >
+              <Scale className="size-3.5 mr-1" />
+              Combine & Settle Net Balance
+              <ArrowRight className="size-3 ml-1" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Action / Filter Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-1.5">
           <Button
             type="button"
@@ -227,7 +297,7 @@ export function ReceiptsTable({
             className="h-7 text-xs rounded-full cursor-pointer"
             onClick={() => handleQuickFilter("all")}
           >
-            All Receipts ({receipts.length})
+            All ({receipts.length})
           </Button>
           <Button
             type="button"
@@ -235,13 +305,12 @@ export function ReceiptsTable({
             size="sm"
             className={cn(
               "h-7 text-xs rounded-full cursor-pointer",
-              quickFilter !== "unpaid" && unpaidCount > 0 && "text-amber-700 dark:text-amber-400 border-amber-500/40",
-              quickFilter === "unpaid" && "bg-amber-600 hover:bg-amber-700 text-white dark:bg-amber-600",
+              quickFilter === "unpaid" && "bg-rose-600 hover:bg-rose-700 text-white",
             )}
             onClick={() => handleQuickFilter("unpaid")}
           >
             <Clock className="size-3 mr-1" />
-            Unpaid / Due ({unpaidCount})
+            Unpaid Due ({unpaidCount})
           </Button>
           <Button
             type="button"
@@ -268,26 +337,39 @@ export function ReceiptsTable({
           </Button>
         </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 text-xs gap-1.5 cursor-pointer ml-auto"
-          onClick={exportCSV}
-        >
-          <Download className="size-3.5" />
-          Export CSV
-        </Button>
+        <div className="flex items-center gap-2 ml-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs gap-1.5 cursor-pointer border-primary/30 text-primary hover:bg-primary/5"
+            onClick={() => setCombineOpen(true)}
+            title="Combine two receipts to calculate net offset balance"
+          >
+            <Scale className="size-3.5" />
+            Combine Receipts
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs gap-1.5 cursor-pointer"
+            onClick={exportCSV}
+          >
+            <Download className="size-3.5" />
+            Export CSV
+          </Button>
+        </div>
       </div>
 
       {/* Search & Filter Dropdowns */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="relative lg:col-span-2">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by location, vendor, date, notes, or #"
-            className="pl-9"
+            placeholder="Search location, vendor, date, notes, #"
+            className="pl-9 text-xs"
           />
         </div>
 
@@ -298,7 +380,7 @@ export function ReceiptsTable({
             setQuickFilter(v as QuickFilter)
           }}
         >
-          <SelectTrigger className="w-full sm:w-40">
+          <SelectTrigger className="w-full text-xs">
             <SelectValue placeholder="Payment status" />
           </SelectTrigger>
           <SelectContent>
@@ -309,11 +391,11 @@ export function ReceiptsTable({
         </Select>
 
         <Select value={locationFilter} onValueChange={setLocationFilter}>
-          <SelectTrigger className="w-full sm:w-44">
-            <SelectValue placeholder="All locations" />
+          <SelectTrigger className="w-full text-xs">
+            <SelectValue placeholder="Billed location" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All locations</SelectItem>
+            <SelectItem value="all">All billed locations</SelectItem>
             {locations.map((l) => (
               <SelectItem key={l.id} value={String(l.id)}>
                 {l.name}
@@ -322,15 +404,15 @@ export function ReceiptsTable({
           </SelectContent>
         </Select>
 
-        <Select value={vendorFilter} onValueChange={setVendorFilter}>
-          <SelectTrigger className="w-full sm:w-44">
-            <SelectValue placeholder="All vendors" />
+        <Select value={payableToFilter} onValueChange={setPayableToFilter}>
+          <SelectTrigger className="w-full text-xs">
+            <SelectValue placeholder="Payable to" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All vendors</SelectItem>
-            {vendors.map((v) => (
-              <SelectItem key={v.id} value={String(v.id)}>
-                {v.name}
+            <SelectItem value="all">All payable to</SelectItem>
+            {locations.map((l) => (
+              <SelectItem key={l.id} value={String(l.id)}>
+                Payable to {l.name}
               </SelectItem>
             ))}
           </SelectContent>
@@ -342,6 +424,9 @@ export function ReceiptsTable({
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/50 hover:bg-muted/50">
+              <TableHead className="w-10 text-center">
+                <span className="text-[10px] uppercase font-bold text-muted-foreground">Select</span>
+              </TableHead>
               <TableHead className="w-14 text-center">
                 <button
                   type="button"
@@ -352,10 +437,16 @@ export function ReceiptsTable({
                 </button>
               </TableHead>
               <SortableHead
-                label="Location"
+                label="Billed Store"
                 active={sortKey === "locationName"}
                 dir={sortDir}
                 onClick={() => toggleSort("locationName")}
+              />
+              <SortableHead
+                label="Payable To"
+                active={sortKey === "payableToLocationName"}
+                dir={sortDir}
+                onClick={() => toggleSort("payableToLocationName")}
               />
               <SortableHead
                 label="Vendor"
@@ -384,7 +475,7 @@ export function ReceiptsTable({
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-32 text-center">
+                <TableCell colSpan={8} className="h-32 text-center">
                   <div className="flex flex-col items-center gap-3 text-muted-foreground">
                     <p>No receipts or credit memos found.</p>
                     <Button asChild variant="outline" size="sm">
@@ -398,15 +489,31 @@ export function ReceiptsTable({
               </TableRow>
             ) : (
               filtered.map((r) => {
+                const isSelected = selectedIds.includes(r.id)
                 return (
                   <TableRow
                     key={r.id}
                     onClick={() => router.push(`/receipts/${r.id}`)}
                     className={cn(
-                      "cursor-pointer group",
+                      "cursor-pointer group transition-colors",
+                      isSelected && "bg-primary/5",
                       r.isPaid ? "opacity-90" : "",
                     )}
                   >
+                    {/* Combine Selection Checkbox */}
+                    <TableCell
+                      className="text-center p-2"
+                      onClick={(e) => toggleSelectReceipt(e, r.id)}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => {}}
+                        className="size-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
+                        title="Select for combining 2 receipts"
+                      />
+                    </TableCell>
+
                     {/* Paid Checkbox Column */}
                     <TableCell
                       className="text-center p-2"
@@ -426,6 +533,7 @@ export function ReceiptsTable({
                       </button>
                     </TableCell>
 
+                    {/* Billed Location */}
                     <TableCell className="font-medium">
                       <div className="flex items-center gap-2">
                         <span>{r.locationName}</span>
@@ -433,13 +541,27 @@ export function ReceiptsTable({
                           #{r.id}
                         </span>
                         {r.isPaid && (
-                          <span className="hidden md:inline-flex items-center gap-0.5 text-[10px] font-bold uppercase text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded">
+                          <span className="hidden lg:inline-flex items-center gap-0.5 text-[10px] font-bold uppercase text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded">
                             PAID
                           </span>
                         )}
                       </div>
                     </TableCell>
 
+                    {/* Payable To Location */}
+                    <TableCell>
+                      {r.payableToLocationName ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-md">
+                          {r.payableToLocationName}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground italic">
+                          —
+                        </span>
+                      )}
+                    </TableCell>
+
+                    {/* Vendor */}
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <span>{r.vendorName}</span>
@@ -452,15 +574,27 @@ export function ReceiptsTable({
                       </div>
                     </TableCell>
 
-                    <TableCell className="text-muted-foreground">
+                    {/* Date */}
+                    <TableCell className="text-muted-foreground text-xs">
                       {formatDate(r.orderDate)}
                     </TableCell>
 
-                    <TableCell className="text-right font-mono tabular-nums text-muted-foreground hidden sm:table-cell">
-                      {r.totalCases}
+                    {/* Cases */}
+                    <TableCell className="text-right text-xs tabular-nums text-muted-foreground hidden sm:table-cell">
+                      {r.totalCases} cs
                     </TableCell>
 
-                    <TableCell className="text-right font-mono font-semibold tabular-nums">
+                    {/* Net Amount */}
+                    <TableCell
+                      className={cn(
+                        "text-right font-semibold font-mono text-sm tabular-nums",
+                        r.amount < 0
+                          ? "text-amber-700 dark:text-amber-400"
+                          : r.isPaid
+                            ? "text-muted-foreground"
+                            : "text-foreground",
+                      )}
+                    >
                       {r.amount < 0 ? "-" : ""}
                       {formatCurrency(Math.abs(r.amount))}
                     </TableCell>
@@ -472,36 +606,14 @@ export function ReceiptsTable({
         </Table>
       </div>
 
-      {/* Footer Breakdown */}
-      <div className="flex flex-col gap-2 px-1 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <span>
-            {filtered.length} {filtered.length === 1 ? "receipt" : "receipts"} (
-            {totalCases.toLocaleString()} cases)
-          </span>
-          {unpaidCount > 0 && (
-            <span className="text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">
-              {unpaidCount} unpaid ({formatCurrency(unpaidTotal)})
-            </span>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-4 text-xs sm:text-sm">
-          {totalCredits > 0 && (
-            <span className="text-amber-700 dark:text-amber-400">
-              Total Credits:{" "}
-              <span className="font-mono font-semibold tabular-nums">
-                -{formatCurrency(totalCredits)}
-              </span>
-            </span>
-          )}
-          <span>
-            Net Total:{" "}
-            <span className="font-mono font-semibold text-foreground tabular-nums">
-              {formatCurrency(netSpend)}
-            </span>
-          </span>
-        </div>
-      </div>
+      {/* Combine Dialog */}
+      <CombinedReceiptDialog
+        open={combineOpen}
+        onOpenChange={setCombineOpen}
+        availableReceipts={receipts}
+        initialId1={selectedIds[0] ?? null}
+        initialId2={selectedIds[1] ?? null}
+      />
     </div>
   )
 }
@@ -520,25 +632,24 @@ function SortableHead({
   align?: "left" | "right"
 }) {
   return (
-    <TableHead className={cn(align === "right" && "text-right")}>
+    <TableHead className={align === "right" ? "text-right" : "text-left"}>
       <button
         type="button"
         onClick={onClick}
         className={cn(
-          "inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide transition-colors hover:text-foreground cursor-pointer",
-          active ? "text-foreground" : "text-muted-foreground",
-          align === "right" && "flex-row-reverse",
+          "inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground cursor-pointer select-none",
+          align === "right" && "ml-auto",
         )}
       >
-        {label}
+        <span>{label}</span>
         {active ? (
           dir === "asc" ? (
-            <ArrowUp className="size-3.5" />
+            <ArrowUp className="size-3 text-foreground" />
           ) : (
-            <ArrowDown className="size-3.5" />
+            <ArrowDown className="size-3 text-foreground" />
           )
         ) : (
-          <ChevronsUpDown className="size-3.5 opacity-50" />
+          <ChevronsUpDown className="size-3 opacity-40" />
         )}
       </button>
     </TableHead>

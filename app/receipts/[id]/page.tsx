@@ -4,7 +4,7 @@ import {
   getProducts,
   getVendors,
 } from "@/app/actions/catalog"
-import { getReceipt } from "@/app/actions/receipts"
+import { getReceipt, getReceipts } from "@/app/actions/receipts"
 import { PageShell } from "@/components/app-nav"
 import { ReceiptDetailView } from "@/components/receipt-detail"
 
@@ -19,8 +19,9 @@ export default async function ReceiptPage({
   const receiptId = Number(id)
   if (!Number.isFinite(receiptId)) notFound()
 
-  const [receipt, locations, vendors, products] = await Promise.all([
+  const [receipt, allReceipts, locations, vendors, products] = await Promise.all([
     getReceipt(receiptId),
+    getReceipts(),
     getLocations(),
     getVendors(),
     getProducts(),
@@ -32,6 +33,7 @@ export default async function ReceiptPage({
     <PageShell>
       <ReceiptDetailView
         receipt={receipt}
+        allReceipts={allReceipts}
         locations={locations}
         vendors={vendors}
         products={products}

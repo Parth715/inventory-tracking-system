@@ -78,11 +78,21 @@ export function PrintedReceipt({ receipt }: { receipt: ReceiptDetail }) {
       {/* Meta info */}
       <div className="grid grid-cols-2 gap-y-2 border-b border-dashed border-foreground/25 py-4">
         <span className="text-xs uppercase tracking-wide text-muted-foreground">
-          Location
+          Billed Location
         </span>
         <span className="text-right font-semibold">
           {receipt.locationName}
         </span>
+        {receipt.payableToLocationName && (
+          <>
+            <span className="text-xs uppercase tracking-wide text-muted-foreground">
+              Payable To
+            </span>
+            <span className="text-right font-semibold text-primary">
+              {receipt.payableToLocationName}
+            </span>
+          </>
+        )}
         <span className="text-xs uppercase tracking-wide text-muted-foreground">
           Date
         </span>
@@ -119,6 +129,24 @@ export function PrintedReceipt({ receipt }: { receipt: ReceiptDetail }) {
           </>
         )}
       </div>
+
+      {/* Inter-Store Payment Terms Callout */}
+      {receipt.payableToLocationName && (
+        <div className="my-3 rounded-lg border border-border/80 bg-muted/40 p-2.5 text-xs text-foreground">
+          <span className="font-semibold uppercase tracking-wider text-[10px] text-muted-foreground block mb-0.5">
+            Inter-Store Settlement
+          </span>
+          <p className="leading-snug">
+            <span className="font-semibold text-foreground">{receipt.locationName}</span> owes{" "}
+            <span className="font-semibold text-primary">{receipt.payableToLocationName}</span>{" "}
+            the receipt balance of{" "}
+            <span className="font-bold tabular-nums">
+              {formatCurrency(isOnlyCredit ? creditTotal : Math.abs(netTotal))}
+            </span>
+            {isOnlyCredit ? " (Credit Memo)" : ""}.
+          </p>
+        </div>
+      )}
 
       {/* Line items table */}
       <table className="w-full">

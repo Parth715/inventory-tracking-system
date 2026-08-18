@@ -7,7 +7,7 @@ import {
   receipts,
   vendors,
 } from "@/lib/db/schema"
-import { desc, eq } from "drizzle-orm"
+import { aliasedTable, desc, eq } from "drizzle-orm"
 import { revalidatePath } from "next/cache"
 
 export type LineItemType = "charge" | "credit"
@@ -26,6 +26,7 @@ export type ReceiptItemInput = {
 
 export type ReceiptInput = {
   locationId: number
+  payableToLocationId?: number | null
   vendorId: number
   orderDate: string
   type?: ReceiptType
@@ -38,8 +39,10 @@ export type ReceiptInput = {
 export type ReceiptListRow = {
   id: number
   locationId: number
+  payableToLocationId: number | null
   vendorId: number
   locationName: string
+  payableToLocationName: string | null
   vendorName: string
   orderDate: string
   type: ReceiptType
@@ -71,8 +74,10 @@ export type ReceiptDetailItem = {
 export type ReceiptDetail = {
   id: number
   locationId: number
+  payableToLocationId: number | null
   vendorId: number
   locationName: string
+  payableToLocationName: string | null
   vendorName: string
   orderDate: string
   type: ReceiptType
@@ -86,13 +91,17 @@ export type ReceiptDetail = {
   netAmount: number
 }
 
+const payableLocations = aliasedTable(locations, "payable_locations")
+
 export async function getReceipts(): Promise<ReceiptListRow[]> {
   const rows = await db
     .select({
       id: receipts.id,
       locationId: receipts.locationId,
+      payableToLocationId: receipts.payableToLocationId,
       vendorId: receipts.vendorId,
       locationName: locations.name,
+      payableToLocationName: payableLocations.name,
       vendorName: vendors.name,
       orderDate: receipts.orderDate,
       type: receipts.type,
@@ -103,6 +112,7 @@ export async function getReceipts(): Promise<ReceiptListRow[]> {
     })
     .from(receipts)
     .leftJoin(locations, eq(receipts.locationId, locations.id))
+    .leftJoin(payableLocations, eq(receipts.payableToLocationId, payableLocations.id))
     .leftJoin(vendors, eq(receipts.vendorId, vendors.id))
     .orderBy(desc(receipts.orderDate), desc(receipts.id))
 
@@ -151,8 +161,10 @@ export async function getReceipts(): Promise<ReceiptListRow[]> {
     return {
       id: r.id,
       locationId: r.locationId,
+      payableToLocationId: r.payableToLocationId ?? null,
       vendorId: r.vendorId,
       locationName: r.locationName ?? "Unknown",
+      payableToLocationName: r.payableToLocationName ?? null,
       vendorName: r.vendorName ?? "Unknown",
       orderDate: r.orderDate,
       type: (r.type as ReceiptType) || (t.grossAmount === 0 && t.creditAmount > 0 ? "credit" : "purchase"),
@@ -176,8 +188,10 @@ export async function getReceipt(id: number): Promise<ReceiptDetail | null> {
     .select({
       id: receipts.id,
       locationId: receipts.locationId,
+      payableToLocationId: receipts.payableToLocationId,
       vendorId: receipts.vendorId,
       locationName: locations.name,
+      payableToLocationName: payableLocations.name,
       vendorName: vendors.name,
       orderDate: receipts.orderDate,
       type: receipts.type,
@@ -188,6 +202,7 @@ export async function getReceipt(id: number): Promise<ReceiptDetail | null> {
     })
     .from(receipts)
     .leftJoin(locations, eq(receipts.locationId, locations.id))
+    .leftJoin(payableLocations, eq(receipts.payableToLocationId, payableLocations.id))
     .leftJoin(vendors, eq(receipts.vendorId, vendors.id))
     .where(eq(receipts.id, id))
 
@@ -226,8 +241,10 @@ export async function getReceipt(id: number): Promise<ReceiptDetail | null> {
   return {
     id: row.id,
     locationId: row.locationId,
+    payableToLocationId: row.payableToLocationId ?? null,
     vendorId: row.vendorId,
     locationName: row.locationName ?? "Unknown",
+    payableToLocationName: row.payableToLocationName ?? null,
     vendorName: row.vendorName ?? "Unknown",
     orderDate: row.orderDate,
     type: (row.type as ReceiptType) || (grossAmount === 0 && creditAmount > 0 ? "credit" : "purchase"),
@@ -242,6 +259,14 @@ export async function getReceipt(id: number): Promise<ReceiptDetail | null> {
   }
 }
 
+function safeRevalidatePath(path: string) {
+  try {
+    revalidatePath(path)
+  } catch {
+    // ignore outside of Next.js server context
+  }
+}
+
 export async function toggleReceiptPaid(id: number, isPaid: boolean) {
   await db
     .update(receipts)
@@ -251,8 +276,42 @@ export async function toggleReceiptPaid(id: number, isPaid: boolean) {
     })
     .where(eq(receipts.id, id))
 
-  revalidatePath("/")
-  revalidatePath(`/receipts/${id}`)
+  safeRevalidatePath("/")
+  safeRevalidatePath(`/receipts/${id}`)
+}
+
+export async function settleCombinedReceipts(
+  receiptId1: number,
+  receiptId2: number,
+  notes?: string
+) {
+  const now = new Date()
+  await db
+    .update(receipts)
+    .set({
+      isPaid: true,
+      paidAt: now,
+      notes: notes
+        ? notes
+        : `Settled via combined offset reconciliation with Receipt #${receiptId2}`,
+    })
+    .where(eq(receipts.id, receiptId1))
+
+  await db
+    .update(receipts)
+    .set({
+      isPaid: true,
+      paidAt: now,
+      notes: notes
+        ? notes
+        : `Settled via combined offset reconciliation with Receipt #${receiptId1}`,
+    })
+    .where(eq(receipts.id, receiptId2))
+
+  safeRevalidatePath("/")
+  safeRevalidatePath(`/receipts/${receiptId1}`)
+  safeRevalidatePath(`/receipts/${receiptId2}`)
+  return { success: true }
 }
 
 function validateItems(items: ReceiptItemInput[]) {
@@ -266,7 +325,7 @@ function validateItems(items: ReceiptItemInput[]) {
 }
 
 export async function createReceipt(input: ReceiptInput) {
-  if (!input.locationId) throw new Error("Location is required")
+  if (!input.locationId) throw new Error("Receiving Location is required")
   if (!input.vendorId) throw new Error("Vendor is required")
   if (!input.orderDate) throw new Error("Order date is required")
   validateItems(input.items)
@@ -278,6 +337,7 @@ export async function createReceipt(input: ReceiptInput) {
     .insert(receipts)
     .values({
       locationId: input.locationId,
+      payableToLocationId: input.payableToLocationId || null,
       vendorId: input.vendorId,
       orderDate: input.orderDate,
       type: docType,
@@ -302,12 +362,12 @@ export async function createReceipt(input: ReceiptInput) {
     })),
   )
 
-  revalidatePath("/")
+  safeRevalidatePath("/")
   return receipt.id
 }
 
 export async function updateReceipt(id: number, input: ReceiptInput) {
-  if (!input.locationId) throw new Error("Location is required")
+  if (!input.locationId) throw new Error("Receiving Location is required")
   if (!input.vendorId) throw new Error("Vendor is required")
   if (!input.orderDate) throw new Error("Order date is required")
   validateItems(input.items)
@@ -319,6 +379,7 @@ export async function updateReceipt(id: number, input: ReceiptInput) {
     .update(receipts)
     .set({
       locationId: input.locationId,
+      payableToLocationId: input.payableToLocationId || null,
       vendorId: input.vendorId,
       orderDate: input.orderDate,
       type: docType,
@@ -344,12 +405,12 @@ export async function updateReceipt(id: number, input: ReceiptInput) {
     })),
   )
 
-  revalidatePath("/")
-  revalidatePath(`/receipts/${id}`)
+  safeRevalidatePath("/")
+  safeRevalidatePath(`/receipts/${id}`)
 }
 
 export async function deleteReceipt(id: number) {
   await db.delete(receiptItems).where(eq(receiptItems.receiptId, id))
   await db.delete(receipts).where(eq(receipts.id, id))
-  revalidatePath("/")
+  safeRevalidatePath("/")
 }

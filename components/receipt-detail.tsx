@@ -3,17 +3,19 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { ArrowLeft, Pencil, Printer, Trash2 } from "lucide-react"
+import { ArrowLeft, Pencil, Printer, Trash2, Scale } from "lucide-react"
 import { toast } from "sonner"
 import type { Location, Product, Vendor } from "@/lib/db/schema"
 import {
   deleteReceipt,
   toggleReceiptPaid,
   type ReceiptDetail,
+  type ReceiptListRow,
 } from "@/app/actions/receipts"
 import { cn } from "@/lib/utils"
 import { PrintedReceipt } from "@/components/printed-receipt"
 import { OrderForm } from "@/components/order-form"
+import { CombinedReceiptDialog } from "@/components/combined-receipt-dialog"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -26,11 +28,13 @@ import {
 
 export function ReceiptDetailView({
   receipt,
+  allReceipts = [],
   locations,
   vendors,
   products,
 }: {
   receipt: ReceiptDetail
+  allReceipts?: ReceiptListRow[]
   locations: Location[]
   vendors: Vendor[]
   products: Product[]
@@ -39,6 +43,7 @@ export function ReceiptDetailView({
   const [editing, setEditing] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [combineOpen, setCombineOpen] = useState(false)
 
   async function handleDelete() {
     setDeleting(true)
@@ -106,6 +111,18 @@ export function ReceiptDetailView({
           >
             {receipt.isPaid ? "Mark as Unpaid" : "✓ Mark as Paid"}
           </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCombineOpen(true)}
+            className="cursor-pointer bg-primary/5 hover:bg-primary/10 border-primary/20 text-primary"
+            title="Combine this receipt with another receipt to calculate net balance"
+          >
+            <Scale className="size-4 mr-1" />
+            Combine Receipts
+          </Button>
+
           <Button variant="outline" size="sm" onClick={() => window.print()}>
             <Printer className="size-4" />
             Print / Download
@@ -127,6 +144,13 @@ export function ReceiptDetailView({
       </div>
 
       <PrintedReceipt receipt={receipt} />
+
+      <CombinedReceiptDialog
+        open={combineOpen}
+        onOpenChange={setCombineOpen}
+        availableReceipts={allReceipts}
+        initialId1={receipt.id}
+      />
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="sm:max-w-sm">
