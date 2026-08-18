@@ -4,7 +4,8 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { BarChart3, Package, Plus, Receipt, Store, MapPin } from "lucide-react"
+import { logoutAction } from "@/app/actions/auth"
+import { BarChart3, Package, Plus, Receipt, Store, MapPin, LogOut } from "lucide-react"
 
 const links = [
   { href: "/", label: "Receipts", icon: Receipt, exact: true },
@@ -58,6 +59,25 @@ export function AppNav() {
               New Order
             </Link>
           </Button>
+
+          <div className="flex items-center gap-1.5 pl-2 border-l border-border">
+            <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-md bg-secondary text-xs font-medium text-secondary-foreground">
+              <span className="size-2 rounded-full bg-emerald-500" />
+              <span>admin</span>
+            </div>
+            <form action={logoutAction}>
+              <Button
+                variant="ghost"
+                size="sm"
+                type="submit"
+                className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer"
+                title="Log out of system"
+              >
+                <LogOut className="size-4" />
+                <span className="hidden sm:inline">Logout</span>
+              </Button>
+            </form>
+          </div>
         </div>
       </div>
 
