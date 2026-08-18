@@ -19,6 +19,7 @@ import {
   Scale,
   ArrowRight,
   Layers,
+  Store,
 } from "lucide-react"
 import {
   toggleReceiptPaid,
@@ -77,9 +78,79 @@ export function ReceiptsTable({
   const [sortKey, setSortKey] = useState<SortKey>("orderDate")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
 
-  // Selection & Combine Dialog state
+  // Multi-Selection & Combine Dialog state
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [combineOpen, setCombineOpen] = useState(false)
+
+  // Determine the 2 established locations from current table selections
+  const establishedLocations = useMemo(() => {
+    const locMap = new Map<number, string>()
+
+    function add(id: number | null | undefined, name: string | null | undefined) {
+      if (id && name && !locMap.has(id)) {
+        locMap.set(id, name)
+      }
+    }
+
+    for (const id of selectedIds) {
+      const row = receipts.find((r) => r.id === id)
+      if (row) {
+        add(row.locationId, row.locationName)
+        add(row.payableToLocationId, row.payableToLocationName)
+      }
+      if (locMap.size >= 2) break
+    }
+
+    if (locMap.size >= 2) {
+      const entries = Array.from(locMap.entries())
+      return {
+        loc1: { id: entries[0][0], name: entries[0][1] },
+        loc2: { id: entries[1][0], name: entries[1][1] },
+        locked: true,
+      }
+    }
+
+    if (locMap.size === 1) {
+      const entries = Array.from(locMap.entries())
+      return {
+        loc1: { id: entries[0][0], name: entries[0][1] },
+        loc2: null,
+        locked: false,
+      }
+    }
+
+    return { loc1: null, loc2: null, locked: false }
+  }, [selectedIds, receipts])
+
+  // Helper to determine if a receipt can be checked
+  function getSelectionState(r: ReceiptListRow) {
+    if (r.isPaid) {
+      return {
+        disabled: true,
+        reason: "Paid receipts cannot be combined",
+      }
+    }
+
+    const isSelected = selectedIds.includes(r.id)
+    if (isSelected) {
+      return { disabled: false, reason: "" }
+    }
+
+    if (establishedLocations.locked && establishedLocations.loc1 && establishedLocations.loc2) {
+      const allowedIds = new Set([establishedLocations.loc1.id, establishedLocations.loc2.id])
+      const isBilledAllowed = allowedIds.has(r.locationId)
+      const isPayableAllowed = !r.payableToLocationId || allowedIds.has(r.payableToLocationId)
+
+      if (!isBilledAllowed || !isPayableAllowed) {
+        return {
+          disabled: true,
+          reason: `Only receipts between ${establishedLocations.loc1.name} and ${establishedLocations.loc2.name} can be selected`,
+        }
+      }
+    }
+
+    return { disabled: false, reason: "" }
+  }
 
   function handleQuickFilter(filter: QuickFilter) {
     setQuickFilter(filter)
@@ -107,16 +178,21 @@ export function ReceiptsTable({
     }
   }
 
-  function toggleSelectReceipt(e: React.MouseEvent, id: number) {
+  function toggleSelectReceipt(e: React.MouseEvent, id: number, isPaid: boolean) {
     e.stopPropagation()
+    const row = receipts.find((r) => r.id === id)
+    if (!row) return
+
+    const selectState = getSelectionState(row)
+    if (selectState.disabled && !selectedIds.includes(id)) {
+      toast.info(selectState.reason)
+      return
+    }
+
     setSelectedIds((prev) => {
       if (prev.includes(id)) {
         return prev.filter((x) => x !== id)
       } else {
-        if (prev.length >= 2) {
-          // Keep only the most recent two
-          return [prev[1], id]
-        }
         return [...prev, id]
       }
     })
@@ -132,6 +208,11 @@ export function ReceiptsTable({
         r.id === id ? { ...r, isPaid: nextPaid, paidAt: nextPaid ? new Date() : null } : r,
       ),
     )
+
+    // If marked as paid, remove from combination selections
+    if (nextPaid) {
+      setSelectedIds((prev) => prev.filter((x) => x !== id))
+    }
 
     startTransition(async () => {
       try {
@@ -255,13 +336,21 @@ export function ReceiptsTable({
 
   return (
     <div className="space-y-4">
-      {/* Top Banner for 2 Selected Receipts to Combine */}
-      {selectedIds.length === 2 && (
+      {/* Top Banner for Selected Receipts */}
+      {selectedIds.length > 0 && (
         <div className="animate-in fade-in slide-in-from-top-2 duration-200 flex flex-col sm:flex-row items-center justify-between gap-3 rounded-lg border-2 border-primary/40 bg-primary/10 p-3 text-sm shadow-sm">
           <div className="flex items-center gap-2 font-medium text-foreground">
             <Scale className="size-4 text-primary shrink-0" />
             <span>
-              2 Receipts Selected: <span className="font-mono font-bold">#{selectedIds[0]}</span> and <span className="font-mono font-bold">#{selectedIds[1]}</span>
+              {selectedIds.length} Receipt{selectedIds.length > 1 ? "s" : ""} Selected:{" "}
+              <span className="font-mono font-bold">
+                {selectedIds.map((id) => `#${id}`).join(", ")}
+              </span>
+              {establishedLocations.locked && establishedLocations.loc1 && establishedLocations.loc2 && (
+                <span className="ml-2 text-xs font-semibold text-primary">
+                  ({establishedLocations.loc1.name} ⇋ {establishedLocations.loc2.name})
+                </span>
+              )}
             </span>
           </div>
 
@@ -276,12 +365,15 @@ export function ReceiptsTable({
             </Button>
             <Button
               size="sm"
+              disabled={selectedIds.length < 2}
               onClick={() => setCombineOpen(true)}
-              className="cursor-pointer shadow-xs bg-primary text-primary-foreground font-semibold text-xs"
+              className="cursor-pointer shadow-xs bg-primary text-primary-foreground font-semibold text-xs disabled:opacity-50"
             >
               <Scale className="size-3.5 mr-1" />
-              Combine & Settle Net Balance
-              <ArrowRight className="size-3 ml-1" />
+              {selectedIds.length < 2
+                ? "Select 1 More Receipt"
+                : `Combine & Settle (${selectedIds.length})`}
+              {selectedIds.length >= 2 && <ArrowRight className="size-3 ml-1" />}
             </Button>
           </div>
         </div>
@@ -343,7 +435,7 @@ export function ReceiptsTable({
             size="sm"
             className="h-7 text-xs gap-1.5 cursor-pointer border-primary/30 text-primary hover:bg-primary/5"
             onClick={() => setCombineOpen(true)}
-            title="Combine two receipts to calculate net offset balance"
+            title="Combine unpaid receipts between 2 stores to calculate net offset balance"
           >
             <Scale className="size-3.5" />
             Combine Receipts
@@ -490,6 +582,8 @@ export function ReceiptsTable({
             ) : (
               filtered.map((r) => {
                 const isSelected = selectedIds.includes(r.id)
+                const selectState = getSelectionState(r)
+
                 return (
                   <TableRow
                     key={r.id}
@@ -502,15 +596,28 @@ export function ReceiptsTable({
                   >
                     {/* Combine Selection Checkbox */}
                     <TableCell
-                      className="text-center p-2"
-                      onClick={(e) => toggleSelectReceipt(e, r.id)}
+                      className={cn(
+                        "text-center p-2",
+                        selectState.disabled ? "cursor-not-allowed" : "cursor-pointer",
+                      )}
+                      onClick={(e) => toggleSelectReceipt(e, r.id, r.isPaid)}
                     >
                       <input
                         type="checkbox"
                         checked={isSelected}
+                        disabled={selectState.disabled}
                         onChange={() => {}}
-                        className="size-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
-                        title="Select for combining 2 receipts"
+                        className={cn(
+                          "size-4 rounded border-border text-primary focus:ring-primary",
+                          selectState.disabled ? "opacity-25 cursor-not-allowed" : "cursor-pointer",
+                        )}
+                        title={
+                          selectState.disabled
+                            ? selectState.reason
+                            : isSelected
+                              ? "Deselect receipt"
+                              : "Select for combining receipts"
+                        }
                       />
                     </TableCell>
 
@@ -611,6 +718,7 @@ export function ReceiptsTable({
         open={combineOpen}
         onOpenChange={setCombineOpen}
         availableReceipts={receipts}
+        initialIds={selectedIds}
         initialId1={selectedIds[0] ?? null}
         initialId2={selectedIds[1] ?? null}
       />

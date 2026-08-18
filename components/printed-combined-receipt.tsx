@@ -10,70 +10,107 @@ export interface NetReconciliationResult {
   netAmount: number
   summaryText: string
   isBalanced: boolean
+  totalDebtorAmount?: number
+  totalCreditorAmount?: number
 }
 
 export function computeNetReconciliation(
-  r1: ReceiptDetail,
-  r2: ReceiptDetail,
+  r1OrList: ReceiptDetail | ReceiptDetail[],
+  r2?: ReceiptDetail,
 ): NetReconciliationResult {
-  const r1From = r1.locationName
-  const r1To = r1.payableToLocationName || r1.locationName
-  const r1Amt = r1.netAmount
+  const receiptsList: ReceiptDetail[] = Array.isArray(r1OrList)
+    ? r1OrList
+    : r2
+      ? [r1OrList, r2]
+      : [r1OrList]
 
-  const r2From = r2.locationName
-  const r2To = r2.payableToLocationName || r2.locationName
-  const r2Amt = r2.netAmount
-
-  // Map balances between pairs
-  // Net owed from A to B
-  if (r1From === r2To && r1To === r2From) {
-    // Direct reciprocal offset: r1 is (A owes B), r2 is (B owes A)
-    const net = r1Amt - r2Amt
-    if (Math.abs(net) < 0.001) {
-      return {
-        debtorLocation: r1From,
-        creditorLocation: r1To,
-        netAmount: 0,
-        summaryText: `Both receipts fully offset each other ($0.00 remaining balance).`,
-        isBalanced: true,
-      }
-    } else if (net > 0) {
-      return {
-        debtorLocation: r1From,
-        creditorLocation: r1To,
-        netAmount: net,
-        summaryText: `${r1From} owes ${r1To} ${formatCurrency(net)} after offsetting ${formatCurrency(r2Amt)}.`,
-        isBalanced: false,
-      }
-    } else {
-      const positiveNet = Math.abs(net)
-      return {
-        debtorLocation: r2From,
-        creditorLocation: r2To,
-        netAmount: positiveNet,
-        summaryText: `${r2From} owes ${r2To} ${formatCurrency(positiveNet)} after offsetting ${formatCurrency(r1Amt)}.`,
-        isBalanced: false,
-      }
-    }
-  } else if (r1From === r2From && r1To === r2To) {
-    // Both are owed in the same direction (A owes B on both receipts)
-    const total = r1Amt + r2Amt
+  if (receiptsList.length === 0) {
     return {
-      debtorLocation: r1From,
-      creditorLocation: r1To,
-      netAmount: total,
-      summaryText: `${r1From} owes ${r1To} a combined total of ${formatCurrency(total)}.`,
+      debtorLocation: "—",
+      creditorLocation: "—",
+      netAmount: 0,
+      summaryText: "No receipts selected.",
+      isBalanced: true,
+    }
+  }
+
+  if (receiptsList.length === 1) {
+    const r = receiptsList[0]
+    return {
+      debtorLocation: r.locationName,
+      creditorLocation: r.payableToLocationName || r.locationName,
+      netAmount: r.netAmount,
+      summaryText: `${r.locationName} owes ${r.payableToLocationName || "ordering store"} ${formatCurrency(r.netAmount)}.`,
       isBalanced: false,
     }
-  } else {
-    // Different store pairs
-    const diff = r1Amt - r2Amt
+  }
+
+  // Identify the two main locations across all receipts
+  const locationsSet = new Set<string>()
+  for (const r of receiptsList) {
+    locationsSet.add(r.locationName)
+    if (r.payableToLocationName) locationsSet.add(r.payableToLocationName)
+  }
+
+  const locArr = Array.from(locationsSet)
+  const locA = locArr[0]
+  const locB = locArr[1] || locArr[0]
+
+  // Tally debt from A to B vs B to A
+  let aOwesB = 0
+  let bOwesA = 0
+
+  for (const r of receiptsList) {
+    const from = r.locationName
+    const to = r.payableToLocationName || (from === locA ? locB : locA)
+
+    if (from === locA && to === locB) {
+      aOwesB += r.netAmount
+    } else if (from === locB && to === locA) {
+      bOwesA += r.netAmount
+    } else if (from === locA) {
+      // default: billed to A means A owes B
+      aOwesB += r.netAmount
+    } else if (from === locB) {
+      // default: billed to B means B owes A
+      bOwesA += r.netAmount
+    } else {
+      aOwesB += r.netAmount
+    }
+  }
+
+  const net = aOwesB - bOwesA
+
+  if (Math.abs(net) < 0.001) {
     return {
-      debtorLocation: r1From,
-      creditorLocation: r2From,
-      netAmount: Math.abs(diff),
-      summaryText: `Receipt #${r1.id} (${formatCurrency(r1Amt)}) combined with Receipt #${r2.id} (${formatCurrency(r2Amt)}). Net difference: ${formatCurrency(Math.abs(diff))}.`,
-      isBalanced: Math.abs(diff) < 0.001,
+      debtorLocation: locA,
+      creditorLocation: locB,
+      netAmount: 0,
+      summaryText: `All ${receiptsList.length} receipts fully offset each other ($0.00 remaining balance).`,
+      isBalanced: true,
+      totalDebtorAmount: aOwesB,
+      totalCreditorAmount: bOwesA,
+    }
+  } else if (net > 0) {
+    return {
+      debtorLocation: locA,
+      creditorLocation: locB,
+      netAmount: net,
+      summaryText: `${locA} owes ${locB} ${formatCurrency(net)} after offsetting ${formatCurrency(bOwesA)}.`,
+      isBalanced: false,
+      totalDebtorAmount: aOwesB,
+      totalCreditorAmount: bOwesA,
+    }
+  } else {
+    const positiveNet = Math.abs(net)
+    return {
+      debtorLocation: locB,
+      creditorLocation: locA,
+      netAmount: positiveNet,
+      summaryText: `${locB} owes ${locA} ${formatCurrency(positiveNet)} after offsetting ${formatCurrency(aOwesB)}.`,
+      isBalanced: false,
+      totalDebtorAmount: bOwesA,
+      totalCreditorAmount: aOwesB,
     }
   }
 }
@@ -81,11 +118,35 @@ export function computeNetReconciliation(
 export function PrintedCombinedReceipt({
   receipt1,
   receipt2,
+  receipts,
 }: {
-  receipt1: ReceiptDetail
-  receipt2: ReceiptDetail
+  receipt1?: ReceiptDetail
+  receipt2?: ReceiptDetail
+  receipts?: ReceiptDetail[]
 }) {
-  const recon = computeNetReconciliation(receipt1, receipt2)
+  const receiptsList: ReceiptDetail[] = receipts
+    ? receipts
+    : receipt1 && receipt2
+      ? [receipt1, receipt2]
+      : receipt1
+        ? [receipt1]
+        : []
+
+  if (receiptsList.length === 0) return null
+
+  const recon = computeNetReconciliation(receiptsList)
+
+  // Collect distinct location names for dual manager signature lines
+  const locNames = Array.from(
+    new Set(
+      receiptsList.flatMap((r) => [
+        r.locationName,
+        r.payableToLocationName,
+      ].filter(Boolean) as string[]),
+    ),
+  )
+  const loc1Name = locNames[0] || "Store 1"
+  const loc2Name = locNames[1] || locNames[0] || "Store 2"
 
   return (
     <div className="print-area receipt-paper mx-auto max-w-2xl rounded-xl border border-border bg-card p-8 font-mono text-sm shadow-md relative overflow-hidden">
@@ -104,7 +165,8 @@ export function PrintedCombinedReceipt({
           Combined Receipt Settlement Slip
         </p>
         <p className="mt-1 text-xs font-semibold tracking-wider uppercase text-muted-foreground">
-          Offset Reconciliation for Invoices #{String(receipt1.id).padStart(5, "0")} & #{String(receipt2.id).padStart(5, "0")}
+          Offset Reconciliation for Invoices:{" "}
+          {receiptsList.map((r) => `#${String(r.id).padStart(5, "0")}`).join(", ")}
         </p>
         <p className="mt-2 text-xs tracking-wide text-muted-foreground">
           ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -125,81 +187,55 @@ export function PrintedCombinedReceipt({
       </div>
 
       {/* Comparison Grid */}
-      <div className="grid grid-cols-2 gap-4 border-y border-dashed border-foreground/25 py-4 text-xs">
-        {/* Receipt 1 Box */}
-        <div className="rounded-lg border border-border/80 bg-muted/30 p-3 space-y-1.5">
-          <div className="flex items-center justify-between border-b border-foreground/10 pb-1">
-            <span className="font-bold text-foreground">Receipt #{String(receipt1.id).padStart(5, "0")}</span>
-            <span className="text-muted-foreground">{formatDate(receipt1.orderDate)}</span>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-y border-dashed border-foreground/25 py-4 text-xs">
+        {receiptsList.map((r) => (
+          <div
+            key={r.id}
+            className="rounded-lg border border-border/80 bg-muted/30 p-3 space-y-1.5"
+          >
+            <div className="flex items-center justify-between border-b border-foreground/10 pb-1">
+              <span className="font-bold text-foreground">
+                Receipt #{String(r.id).padStart(5, "0")}
+              </span>
+              <span className="text-muted-foreground">{formatDate(r.orderDate)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Vendor:</span>
+              <span className="font-medium text-right">{r.vendorName}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Billed To:</span>
+              <span className="font-semibold text-right">{r.locationName}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Payable To:</span>
+              <span className="font-semibold text-right text-primary">
+                {r.payableToLocationName || "—"}
+              </span>
+            </div>
+            <div className="flex justify-between border-t border-foreground/10 pt-1 font-bold text-sm">
+              <span>Amount:</span>
+              <span className="font-mono">{formatCurrency(r.netAmount)}</span>
+            </div>
           </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Vendor:</span>
-            <span className="font-medium text-right">{receipt1.vendorName}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Billed To:</span>
-            <span className="font-semibold text-right">{receipt1.locationName}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Payable To:</span>
-            <span className="font-semibold text-right text-primary">
-              {receipt1.payableToLocationName || "—"}
-            </span>
-          </div>
-          <div className="flex justify-between border-t border-foreground/10 pt-1 font-bold text-sm">
-            <span>Amount:</span>
-            <span className="font-mono">{formatCurrency(receipt1.netAmount)}</span>
-          </div>
-        </div>
-
-        {/* Receipt 2 Box */}
-        <div className="rounded-lg border border-border/80 bg-muted/30 p-3 space-y-1.5">
-          <div className="flex items-center justify-between border-b border-foreground/10 pb-1">
-            <span className="font-bold text-foreground">Receipt #{String(receipt2.id).padStart(5, "0")}</span>
-            <span className="text-muted-foreground">{formatDate(receipt2.orderDate)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Vendor:</span>
-            <span className="font-medium text-right">{receipt2.vendorName}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Billed To:</span>
-            <span className="font-semibold text-right">{receipt2.locationName}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Payable To:</span>
-            <span className="font-semibold text-right text-primary">
-              {receipt2.payableToLocationName || "—"}
-            </span>
-          </div>
-          <div className="flex justify-between border-t border-foreground/10 pt-1 font-bold text-sm">
-            <span>Amount:</span>
-            <span className="font-mono">{formatCurrency(receipt2.netAmount)}</span>
-          </div>
-        </div>
+        ))}
       </div>
 
       {/* Net Calculation Math Breakdown */}
       <div className="mt-4 border-b border-dashed border-foreground/25 pb-4 space-y-1.5 text-xs">
         <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2">
-          Reconciliation Breakdown
+          Reconciliation Breakdown ({loc1Name} ⇋ {loc2Name})
         </div>
-        <div className="flex justify-between">
-          <span>
-            1. Invoice #{receipt1.id} ({receipt1.locationName} owes {receipt1.payableToLocationName || "Ordering Store"})
-          </span>
-          <span className="font-mono font-semibold tabular-nums">
-            {formatCurrency(receipt1.netAmount)}
-          </span>
-        </div>
-        <div className="flex justify-between text-muted-foreground">
-          <span>
-            2. Less Invoice #{receipt2.id} Offset ({receipt2.locationName} owes {receipt2.payableToLocationName || "Ordering Store"})
-          </span>
-          <span className="font-mono font-semibold tabular-nums">
-            -{formatCurrency(receipt2.netAmount)}
-          </span>
-        </div>
+        {receiptsList.map((r, i) => (
+          <div key={`breakdown-${r.id}`} className="flex justify-between">
+            <span>
+              {i + 1}. Invoice #{r.id} ({r.locationName} owes {r.payableToLocationName || "Ordering Store"})
+            </span>
+            <span className="font-mono font-semibold tabular-nums">
+              {formatCurrency(r.netAmount)}
+            </span>
+          </div>
+        ))}
         <div className="flex justify-between border-t border-foreground/20 pt-2 text-sm font-bold text-foreground">
           <span>FINAL NET DUE:</span>
           <span className="font-mono text-base text-primary tabular-nums">
@@ -210,75 +246,49 @@ export function PrintedCombinedReceipt({
 
       {/* Combined Line Items Section */}
       <div className="mt-5 space-y-4">
-        <div>
-          <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2 flex items-center justify-between">
-            <span>Items on Receipt #{receipt1.id} ({receipt1.vendorName})</span>
-            <span className="font-mono">{formatCurrency(receipt1.netAmount)}</span>
-          </div>
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-foreground/20 text-left text-[10px] uppercase text-muted-foreground">
-                <th className="pb-1">Product</th>
-                <th className="pb-1 text-right">Cases</th>
-                <th className="pb-1 text-right">Price</th>
-                <th className="pb-1 text-right">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {receipt1.items.map((it) => (
-                <tr key={`r1-${it.id}`} className="border-b border-dotted border-foreground/10">
-                  <td className="py-1">
-                    {it.productName} ({formatPackage(it.packageSize, it.unit)})
-                    {it.itemType === "credit" && (
-                      <span className="text-amber-600 block text-[10px]">[CREDIT]</span>
-                    )}
-                  </td>
-                  <td className="py-1 text-right tabular-nums">{it.cases}</td>
-                  <td className="py-1 text-right tabular-nums">{formatCurrency(it.pricePerCase)}</td>
-                  <td className="py-1 text-right font-semibold tabular-nums">
-                    {it.itemType === "credit" ? "-" : ""}
-                    {formatCurrency(it.cases * it.pricePerCase)}
-                  </td>
+        {receiptsList.map((r) => (
+          <div key={`items-section-${r.id}`}>
+            <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2 flex items-center justify-between">
+              <span>
+                Items on Receipt #{r.id} ({r.vendorName} • Billed to {r.locationName})
+              </span>
+              <span className="font-mono">{formatCurrency(r.netAmount)}</span>
+            </div>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-foreground/20 text-left text-[10px] uppercase text-muted-foreground">
+                  <th className="pb-1">Product</th>
+                  <th className="pb-1 text-right">Cases</th>
+                  <th className="pb-1 text-right">Price</th>
+                  <th className="pb-1 text-right">Total</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div>
-          <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2 flex items-center justify-between">
-            <span>Items on Receipt #{receipt2.id} ({receipt2.vendorName})</span>
-            <span className="font-mono">{formatCurrency(receipt2.netAmount)}</span>
+              </thead>
+              <tbody>
+                {r.items.map((it) => (
+                  <tr
+                    key={`item-${r.id}-${it.id}`}
+                    className="border-b border-dotted border-foreground/10"
+                  >
+                    <td className="py-1">
+                      {it.productName} ({formatPackage(it.packageSize, it.unit)})
+                      {it.itemType === "credit" && (
+                        <span className="text-amber-600 block text-[10px]">[CREDIT]</span>
+                      )}
+                    </td>
+                    <td className="py-1 text-right tabular-nums">{it.cases}</td>
+                    <td className="py-1 text-right tabular-nums">
+                      {formatCurrency(it.pricePerCase)}
+                    </td>
+                    <td className="py-1 text-right font-semibold tabular-nums">
+                      {it.itemType === "credit" ? "-" : ""}
+                      {formatCurrency(it.cases * it.pricePerCase)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-foreground/20 text-left text-[10px] uppercase text-muted-foreground">
-                <th className="pb-1">Product</th>
-                <th className="pb-1 text-right">Cases</th>
-                <th className="pb-1 text-right">Price</th>
-                <th className="pb-1 text-right">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {receipt2.items.map((it) => (
-                <tr key={`r2-${it.id}`} className="border-b border-dotted border-foreground/10">
-                  <td className="py-1">
-                    {it.productName} ({formatPackage(it.packageSize, it.unit)})
-                    {it.itemType === "credit" && (
-                      <span className="text-amber-600 block text-[10px]">[CREDIT]</span>
-                    )}
-                  </td>
-                  <td className="py-1 text-right tabular-nums">{it.cases}</td>
-                  <td className="py-1 text-right tabular-nums">{formatCurrency(it.pricePerCase)}</td>
-                  <td className="py-1 text-right font-semibold tabular-nums">
-                    {it.itemType === "credit" ? "-" : ""}
-                    {formatCurrency(it.cases * it.pricePerCase)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        ))}
       </div>
 
       {/* Signature & Authorization Section */}
@@ -286,13 +296,13 @@ export function PrintedCombinedReceipt({
         <div>
           <div className="h-10 border-b border-foreground/40 mb-1" />
           <p className="font-semibold text-center text-muted-foreground">
-            {receipt1.locationName} Manager Signature
+            {loc1Name} Manager Signature
           </p>
         </div>
         <div>
           <div className="h-10 border-b border-foreground/40 mb-1" />
           <p className="font-semibold text-center text-muted-foreground">
-            {receipt2.locationName} Manager Signature
+            {loc2Name} Manager Signature
           </p>
         </div>
       </div>

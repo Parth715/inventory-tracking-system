@@ -115,9 +115,19 @@ export function ReceiptDetailView({
           <Button
             variant="outline"
             size="sm"
+            disabled={receipt.isPaid}
             onClick={() => setCombineOpen(true)}
-            className="cursor-pointer bg-primary/5 hover:bg-primary/10 border-primary/20 text-primary"
-            title="Combine this receipt with another receipt to calculate net balance"
+            className={cn(
+              "cursor-pointer border-primary/20",
+              receipt.isPaid
+                ? "opacity-50 cursor-not-allowed text-muted-foreground"
+                : "bg-primary/5 hover:bg-primary/10 text-primary",
+            )}
+            title={
+              receipt.isPaid
+                ? "This receipt is already marked as Paid and cannot be combined"
+                : "Combine this receipt with another receipt to calculate net balance"
+            }
           >
             <Scale className="size-4 mr-1" />
             Combine Receipts

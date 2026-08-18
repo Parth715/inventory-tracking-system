@@ -8,11 +8,12 @@ import {
   CheckCircle2,
   FileSpreadsheet,
   Loader2,
+  Plus,
   Printer,
   Scale,
-  Sparkles,
   Store,
-  Layers,
+  Trash2,
+  X,
 } from "lucide-react"
 
 import {
@@ -44,81 +45,223 @@ import {
   PrintedCombinedReceipt,
 } from "@/components/printed-combined-receipt"
 
+interface ReceiptSlot {
+  key: string
+  selectedId: string
+  detail: ReceiptDetail | null
+  loading: boolean
+}
+
+function makeSlot(id?: number | null): ReceiptSlot {
+  return {
+    key: crypto.randomUUID(),
+    selectedId: id ? String(id) : "",
+    detail: null,
+    loading: false,
+  }
+}
+
 export function CombinedReceiptDialog({
   open,
   onOpenChange,
   availableReceipts,
   initialId1,
   initialId2,
+  initialIds,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   availableReceipts: ReceiptListRow[]
   initialId1?: number | null
   initialId2?: number | null
+  initialIds?: number[]
 }) {
   const router = useRouter()
 
-  const [id1, setId1] = React.useState<string>(initialId1 ? String(initialId1) : "")
-  const [id2, setId2] = React.useState<string>(initialId2 ? String(initialId2) : "")
-  const [receipt1, setReceipt1] = React.useState<ReceiptDetail | null>(null)
-  const [receipt2, setReceipt2] = React.useState<ReceiptDetail | null>(null)
-  const [loading, setLoading] = React.useState(false)
+  function getInitialSlots() {
+    if (initialIds && initialIds.length > 0) {
+      return initialIds.map((id) => makeSlot(id))
+    }
+    return [makeSlot(initialId1), makeSlot(initialId2)]
+  }
+
+  const [slots, setSlots] = React.useState<ReceiptSlot[]>(getInitialSlots)
   const [settling, setSettling] = React.useState(false)
   const [viewMode, setViewMode] = React.useState<"summary" | "slip">("summary")
 
-  // Update initial IDs when dialog opens
+  // Reset slots when dialog opens with new initial IDs
   React.useEffect(() => {
-    if (initialId1) setId1(String(initialId1))
-    if (initialId2) setId2(String(initialId2))
-  }, [initialId1, initialId2, open])
+    if (open) {
+      if (initialIds && initialIds.length > 0) {
+        setSlots(initialIds.map((id) => makeSlot(id)))
+      } else {
+        setSlots([makeSlot(initialId1), makeSlot(initialId2)])
+      }
+      setViewMode("summary")
+    }
+  }, [open, initialId1, initialId2, initialIds])
 
-  // Fetch receipt details when selection changes
-  React.useEffect(() => {
-    async function loadReceipts() {
-      if (!id1 && !id2) {
-        setReceipt1(null)
-        setReceipt2(null)
+  // Fetch receipt details when a slot's selection changes
+  const fetchReceipt = React.useCallback(
+    async (slotKey: string, receiptId: string) => {
+      if (!receiptId) {
+        setSlots((prev) =>
+          prev.map((s) =>
+            s.key === slotKey ? { ...s, detail: null, loading: false } : s,
+          ),
+        )
         return
       }
 
-      setLoading(true)
+      setSlots((prev) =>
+        prev.map((s) => (s.key === slotKey ? { ...s, loading: true } : s)),
+      )
+
       try {
-        const [r1, r2] = await Promise.all([
-          id1 ? getReceipt(Number(id1)) : null,
-          id2 ? getReceipt(Number(id2)) : null,
-        ])
-        setReceipt1(r1)
-        setReceipt2(r2)
-      } catch (err) {
-        console.error("Failed to load receipts for combination:", err)
+        const detail = await getReceipt(Number(receiptId))
+        setSlots((prev) =>
+          prev.map((s) =>
+            s.key === slotKey ? { ...s, detail, loading: false } : s,
+          ),
+        )
+      } catch {
         toast.error("Failed to load receipt details")
-      } finally {
-        setLoading(false)
+        setSlots((prev) =>
+          prev.map((s) =>
+            s.key === slotKey ? { ...s, loading: false } : s,
+          ),
+        )
+      }
+    },
+    [],
+  )
+
+  // Trigger fetch when initial slots load
+  React.useEffect(() => {
+    for (const slot of slots) {
+      if (slot.selectedId && !slot.detail && !slot.loading) {
+        fetchReceipt(slot.key, slot.selectedId)
+      }
+    }
+  }, [slots, fetchReceipt])
+
+  function handleSlotChange(slotKey: string, newId: string) {
+    setSlots((prev) =>
+      prev.map((s) =>
+        s.key === slotKey ? { ...s, selectedId: newId, detail: null } : s,
+      ),
+    )
+    fetchReceipt(slotKey, newId)
+  }
+
+  function addSlot() {
+    setSlots((prev) => [...prev, makeSlot()])
+  }
+
+  function removeSlot(slotKey: string) {
+    setSlots((prev) => prev.filter((s) => s.key !== slotKey))
+  }
+
+  const selectedIdSet = new Set(
+    slots.map((s) => s.selectedId).filter(Boolean),
+  )
+
+  // Determine the 2 established locations
+  const establishedLocations = React.useMemo(() => {
+    const locMap = new Map<number, string>()
+
+    function add(id: number | null | undefined, name: string | null | undefined) {
+      if (id && name && !locMap.has(id)) {
+        locMap.set(id, name)
       }
     }
 
-    if (open) {
-      loadReceipts()
+    for (const slot of slots) {
+      if (!slot.selectedId) continue
+      const row = availableReceipts.find((r) => String(r.id) === slot.selectedId)
+      const detail = slot.detail
+      if (detail) {
+        add(detail.locationId, detail.locationName)
+        add(detail.payableToLocationId, detail.payableToLocationName)
+      } else if (row) {
+        add(row.locationId, row.locationName)
+        add(row.payableToLocationId, row.payableToLocationName)
+      }
+      if (locMap.size >= 2) break
     }
-  }, [id1, id2, open])
 
-  const recon =
-    receipt1 && receipt2 ? computeNetReconciliation(receipt1, receipt2) : null
+    if (locMap.size >= 2) {
+      const entries = Array.from(locMap.entries())
+      return {
+        loc1: { id: entries[0][0], name: entries[0][1] },
+        loc2: { id: entries[1][0], name: entries[1][1] },
+        locked: true,
+      }
+    }
 
-  async function handleSettleBoth() {
-    if (!receipt1 || !receipt2) return
+    if (locMap.size === 1) {
+      const entries = Array.from(locMap.entries())
+      return {
+        loc1: { id: entries[0][0], name: entries[0][1] },
+        loc2: null,
+        locked: false,
+      }
+    }
+
+    return { loc1: null, loc2: null, locked: false }
+  }, [slots, availableReceipts])
+
+  // Filter available options for a given slot: strictly exclude Paid receipts
+  function getOptionsForSlot(slot: ReceiptSlot) {
+    return availableReceipts.filter((r) => {
+      // Exclude receipts that are marked as paid (unless already selected in this specific slot)
+      if (r.isPaid && String(r.id) !== slot.selectedId) return false
+
+      // Allow the currently selected receipt in this slot
+      if (String(r.id) === slot.selectedId) return true
+
+      // Don't show receipts already selected in other slots
+      if (selectedIdSet.has(String(r.id))) return false
+
+      // If the 2 locations are established, only allow receipts between those 2 locations
+      if (establishedLocations.locked && establishedLocations.loc1 && establishedLocations.loc2) {
+        const allowedIds = new Set([establishedLocations.loc1.id, establishedLocations.loc2.id])
+        const isBilledAllowed = allowedIds.has(r.locationId)
+        const isPayableAllowed = !r.payableToLocationId || allowedIds.has(r.payableToLocationId)
+        return isBilledAllowed && isPayableAllowed
+      }
+
+      return true
+    })
+  }
+
+  const loadedReceipts = slots
+    .map((s) => s.detail)
+    .filter(Boolean) as ReceiptDetail[]
+  const allLoaded = slots.every(
+    (s) => !s.selectedId || (s.detail && !s.loading),
+  )
+  const anyLoading = slots.some((s) => s.loading)
+  const hasEnoughReceipts = loadedReceipts.length >= 2
+
+  const recon = hasEnoughReceipts ? computeNetReconciliation(loadedReceipts) : null
+
+  async function handleSettleAll() {
+    if (loadedReceipts.length < 2) return
     setSettling(true)
     try {
-      await settleCombinedReceipts(
-        receipt1.id,
-        receipt2.id,
-        `Settled via Combined Offset: Receipt #${receipt1.id} (${formatCurrency(
-          receipt1.netAmount,
-        )}) ⇋ Receipt #${receipt2.id} (${formatCurrency(receipt2.netAmount)})`,
-      )
-      toast.success("Both receipts marked as Paid & Settled!", {
-        description: `Combined offset recorded for Receipt #${receipt1.id} & #${receipt2.id}.`,
+      const ids = loadedReceipts.map((r) => r.id)
+      const idListStr = ids.map((id) => `#${id}`).join(", ")
+      const notes = `Settled via Combined Offset Reconciliation: ${idListStr}`
+
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          await settleCombinedReceipts(ids[i], ids[j], notes)
+        }
+      }
+
+      toast.success(`All ${ids.length} receipts marked as Paid & Settled!`, {
+        description: `Combined offset recorded for ${idListStr}.`,
       })
       onOpenChange(false)
       router.refresh()
@@ -138,98 +281,145 @@ export function CombinedReceiptDialog({
             <span>Inter-Store Net Reconciliation</span>
           </div>
           <DialogTitle className="text-xl">
-            Combine 2 Receipts & Settle Net Balance
+            Combine Receipts & Settle Net Balance
           </DialogTitle>
           <DialogDescription>
-            Select two receipts between stores to net their amounts and calculate the remaining inter-store balance.
+            Select unpaid receipts between 2 stores to calculate their net offset. Once 2 receipts are selected, all additional receipts are automatically filtered to those 2 locations.
           </DialogDescription>
         </DialogHeader>
 
-        {/* Receipt Selectors */}
-        <div className="grid gap-4 sm:grid-cols-2 pt-2">
-          {/* Selector 1 */}
-          <div className="space-y-1.5 rounded-lg border border-border bg-card p-3 shadow-2xs">
-            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block">
-              Receipt #1 (First Store Invoice)
+        {/* 2-Store Lock Indicator Banner */}
+        {establishedLocations.locked && establishedLocations.loc1 && establishedLocations.loc2 && (
+          <div className="animate-in fade-in duration-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-xs">
+            <div className="flex items-center gap-2 font-medium">
+              <Store className="size-4 text-primary shrink-0" />
+              <span>
+                Reconciling Between:{" "}
+                <span className="font-bold text-foreground underline decoration-primary/50">
+                  {establishedLocations.loc1.name}
+                </span>{" "}
+                ⇋{" "}
+                <span className="font-bold text-foreground underline decoration-primary/50">
+                  {establishedLocations.loc2.name}
+                </span>
+              </span>
+            </div>
+            <span className="text-[11px] text-muted-foreground font-semibold">
+              ✓ Showing unpaid receipts for these 2 locations
             </span>
-            <Select value={id1} onValueChange={setId1}>
-              <SelectTrigger className="w-full text-xs">
-                <SelectValue placeholder="Select first receipt..." />
-              </SelectTrigger>
-              <SelectContent>
-                {availableReceipts
-                  .filter((r) => String(r.id) !== id2)
-                  .map((r) => (
-                    <SelectItem key={r.id} value={String(r.id)}>
-                      #{r.id} • {r.locationName} {r.payableToLocationName ? `→ ${r.payableToLocationName}` : ""} ({formatCurrency(r.amount)})
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-
-            {receipt1 && (
-              <div className="mt-2 space-y-1 text-xs text-muted-foreground border-t border-border/60 pt-2">
-                <div className="flex justify-between font-medium text-foreground">
-                  <span>{receipt1.vendorName}</span>
-                  <span className="font-mono">{formatCurrency(receipt1.netAmount)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Billed Store:</span>
-                  <span className="font-semibold text-foreground">{receipt1.locationName}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Payable To:</span>
-                  <span className="font-semibold text-primary">{receipt1.payableToLocationName || "—"}</span>
-                </div>
-              </div>
-            )}
           </div>
+        )}
 
-          {/* Selector 2 */}
-          <div className="space-y-1.5 rounded-lg border border-border bg-card p-3 shadow-2xs">
-            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block">
-              Receipt #2 (Second Store Invoice)
-            </span>
-            <Select value={id2} onValueChange={setId2}>
-              <SelectTrigger className="w-full text-xs">
-                <SelectValue placeholder="Select second receipt..." />
-              </SelectTrigger>
-              <SelectContent>
-                {availableReceipts
-                  .filter((r) => String(r.id) !== id1)
-                  .map((r) => (
-                    <SelectItem key={r.id} value={String(r.id)}>
-                      #{r.id} • {r.locationName} {r.payableToLocationName ? `→ ${r.payableToLocationName}` : ""} ({formatCurrency(r.amount)})
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
+        {/* Receipt Slots */}
+        <div className="space-y-3 pt-2">
+          {slots.map((slot, idx) => {
+            const options = getOptionsForSlot(slot)
+            return (
+              <div
+                key={slot.key}
+                className="rounded-lg border border-border bg-card p-3 shadow-2xs"
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Receipt #{idx + 1}
+                  </span>
+                  {slots.length > 2 && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-6 cursor-pointer text-muted-foreground hover:text-destructive"
+                      onClick={() => removeSlot(slot.key)}
+                      title="Remove this receipt"
+                    >
+                      <X className="size-3.5" />
+                    </Button>
+                  )}
+                </div>
 
-            {receipt2 && (
-              <div className="mt-2 space-y-1 text-xs text-muted-foreground border-t border-border/60 pt-2">
-                <div className="flex justify-between font-medium text-foreground">
-                  <span>{receipt2.vendorName}</span>
-                  <span className="font-mono">{formatCurrency(receipt2.netAmount)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Billed Store:</span>
-                  <span className="font-semibold text-foreground">{receipt2.locationName}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Payable To:</span>
-                  <span className="font-semibold text-primary">{receipt2.payableToLocationName || "—"}</span>
-                </div>
+                <Select
+                  value={slot.selectedId}
+                  onValueChange={(v) => handleSlotChange(slot.key, v)}
+                >
+                  <SelectTrigger className="w-full text-xs">
+                    <SelectValue placeholder="Select an unpaid receipt..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {options.length === 0 ? (
+                      <div className="p-2 text-xs text-muted-foreground text-center">
+                        No unpaid receipts found for this selection.
+                      </div>
+                    ) : (
+                      options.map((r) => (
+                        <SelectItem key={r.id} value={String(r.id)}>
+                          #{r.id} • {r.locationName}{" "}
+                          {r.payableToLocationName
+                            ? `→ ${r.payableToLocationName}`
+                            : ""}{" "}
+                          ({formatCurrency(r.amount)})
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+
+                {slot.loading && (
+                  <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="size-3 animate-spin" />
+                    <span>Loading details...</span>
+                  </div>
+                )}
+
+                {slot.detail && !slot.loading && (
+                  <div className="mt-2 space-y-1 text-xs text-muted-foreground border-t border-border/60 pt-2">
+                    <div className="flex justify-between font-medium text-foreground">
+                      <span>{slot.detail.vendorName}</span>
+                      <span className="font-mono">
+                        {formatCurrency(slot.detail.netAmount)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Billed Store:</span>
+                      <span className="font-semibold text-foreground">
+                        {slot.detail.locationName}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Payable To:</span>
+                      <span className="font-semibold text-primary">
+                        {slot.detail.payableToLocationName || "—"}
+                      </span>
+                    </div>
+                    {slot.detail.isPaid && (
+                      <div className="flex justify-between text-rose-600 font-semibold pt-1">
+                        <span>Status:</span>
+                        <span>Already Paid</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            )
+          })}
+
+          {/* Add More Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={addSlot}
+            className="cursor-pointer w-full text-xs border-dashed border-2 h-10 hover:bg-primary/5"
+          >
+            <Plus className="size-3.5 mr-1.5" />
+            Add Another Receipt to Combine
+          </Button>
         </div>
 
-        {loading ? (
-          <div className="py-12 flex flex-col items-center justify-center gap-2 text-muted-foreground text-sm">
+        {/* Results */}
+        {anyLoading ? (
+          <div className="py-8 flex flex-col items-center justify-center gap-2 text-muted-foreground text-sm">
             <Loader2 className="size-6 animate-spin text-primary" />
             <span>Calculating net reconciliation...</span>
           </div>
-        ) : receipt1 && receipt2 && recon ? (
+        ) : hasEnoughReceipts && allLoaded && recon ? (
           <div className="space-y-4 pt-2">
             {/* View Mode Toggle */}
             <div className="flex items-center justify-between border-b border-border pb-2">
@@ -261,42 +451,48 @@ export function CombinedReceiptDialog({
                 className="cursor-pointer text-xs"
               >
                 <Printer className="size-3.5 mr-1" />
-                Print Combined Slip
+                Print Slip
               </Button>
             </div>
 
+            {/* Net Calculation Summary View */}
             {viewMode === "summary" ? (
               <div className="space-y-4">
-                {/* Visual Netting Card */}
                 <div className="rounded-xl border-2 border-primary/40 bg-primary/5 p-4 shadow-sm">
                   <div className="flex items-center justify-between text-xs text-muted-foreground font-semibold uppercase tracking-wider">
                     <span>Inter-Store Net Result</span>
                     <span className="font-mono text-foreground font-bold">
-                      {receipt1.id} ⇋ {receipt2.id}
+                      {loadedReceipts.map((r) => `#${r.id}`).join(" + ")}
                     </span>
                   </div>
 
-                  <div className="my-3 flex flex-col sm:flex-row items-center justify-between gap-4 border-y border-border/80 py-3">
-                    <div className="text-center sm:text-left">
-                      <p className="text-xs text-muted-foreground">Receipt #{receipt1.id} ({receipt1.locationName})</p>
-                      <p className="text-lg font-bold font-mono text-foreground">
-                        {formatCurrency(receipt1.netAmount)}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-background border border-border text-xs font-semibold text-muted-foreground">
-                      <span>Offset Offset</span>
-                      <ArrowRight className="size-3 text-primary" />
-                    </div>
-
-                    <div className="text-center sm:text-right">
-                      <p className="text-xs text-muted-foreground">Receipt #{receipt2.id} ({receipt2.locationName})</p>
-                      <p className="text-lg font-bold font-mono text-foreground">
-                        {formatCurrency(receipt2.netAmount)}
-                      </p>
-                    </div>
+                  {/* Visual Comparison Grid */}
+                  <div className="my-3 grid grid-cols-1 sm:grid-cols-2 gap-2 border-y border-border/80 py-3">
+                    {loadedReceipts.map((r) => (
+                      <div
+                        key={r.id}
+                        className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2 text-xs"
+                      >
+                        <div>
+                          <span className="font-mono text-muted-foreground font-bold">
+                            #{r.id}
+                          </span>{" "}
+                          <span className="font-semibold">{r.locationName}</span>
+                          {r.payableToLocationName && (
+                            <span className="text-primary font-medium">
+                              {" → "}
+                              {r.payableToLocationName}
+                            </span>
+                          )}
+                        </div>
+                        <span className="font-mono font-bold">
+                          {formatCurrency(r.netAmount)}
+                        </span>
+                      </div>
+                    ))}
                   </div>
 
+                  {/* Final Net Payment Banner */}
                   <div className="rounded-lg bg-background p-3 border border-border/80 text-center sm:text-left sm:flex sm:items-center sm:justify-between">
                     <div>
                       <span className="text-xs uppercase font-bold tracking-wider text-muted-foreground block">
@@ -312,56 +508,54 @@ export function CombinedReceiptDialog({
                   </div>
                 </div>
 
-                {/* Quick Details of Line Items */}
-                <div className="grid gap-3 sm:grid-cols-2 text-xs text-muted-foreground">
-                  <div className="rounded-lg border border-border bg-muted/20 p-3">
-                    <p className="font-semibold text-foreground mb-1">
-                      Receipt #{receipt1.id} Items ({receipt1.items.length})
-                    </p>
-                    <ul className="space-y-1">
-                      {receipt1.items.slice(0, 4).map((it) => (
-                        <li key={it.id} className="flex justify-between">
-                          <span className="truncate pr-2">{it.productName} ({it.cases} cs)</span>
-                          <span className="font-mono font-medium text-foreground">
-                            {formatCurrency(it.cases * it.pricePerCase)}
-                          </span>
-                        </li>
-                      ))}
-                      {receipt1.items.length > 4 && (
-                        <li className="text-[11px] italic">+{receipt1.items.length - 4} more item(s)...</li>
-                      )}
-                    </ul>
-                  </div>
-
-                  <div className="rounded-lg border border-border bg-muted/20 p-3">
-                    <p className="font-semibold text-foreground mb-1">
-                      Receipt #{receipt2.id} Items ({receipt2.items.length})
-                    </p>
-                    <ul className="space-y-1">
-                      {receipt2.items.slice(0, 4).map((it) => (
-                        <li key={it.id} className="flex justify-between">
-                          <span className="truncate pr-2">{it.productName} ({it.cases} cs)</span>
-                          <span className="font-mono font-medium text-foreground">
-                            {formatCurrency(it.cases * it.pricePerCase)}
-                          </span>
-                        </li>
-                      ))}
-                      {receipt2.items.length > 4 && (
-                        <li className="text-[11px] italic">+{receipt2.items.length - 4} more item(s)...</li>
-                      )}
-                    </ul>
-                  </div>
+                {/* Line Items Summary */}
+                <div
+                  className={cn(
+                    "grid gap-3 text-xs text-muted-foreground",
+                    loadedReceipts.length <= 3
+                      ? "sm:grid-cols-2 lg:grid-cols-3"
+                      : "sm:grid-cols-2",
+                  )}
+                >
+                  {loadedReceipts.map((r) => (
+                    <div
+                      key={r.id}
+                      className="rounded-lg border border-border bg-muted/20 p-3"
+                    >
+                      <p className="font-semibold text-foreground mb-1">
+                        Receipt #{r.id} ({r.locationName})
+                      </p>
+                      <ul className="space-y-1">
+                        {r.items.slice(0, 4).map((it) => (
+                          <li key={it.id} className="flex justify-between">
+                            <span className="truncate pr-2">
+                              {it.productName} ({it.cases} cs)
+                            </span>
+                            <span className="font-mono font-medium text-foreground">
+                              {formatCurrency(it.cases * it.pricePerCase)}
+                            </span>
+                          </li>
+                        ))}
+                        {r.items.length > 4 && (
+                          <li className="text-[11px] italic">
+                            +{r.items.length - 4} more item(s)...
+                          </li>
+                        )}
+                      </ul>
+                    </div>
+                  ))}
                 </div>
               </div>
             ) : (
+              /* Printable Slip View */
               <div className="border border-border rounded-xl p-2 bg-muted/20 overflow-x-auto">
-                <PrintedCombinedReceipt receipt1={receipt1} receipt2={receipt2} />
+                <PrintedCombinedReceipt receipts={loadedReceipts} />
               </div>
             )}
           </div>
         ) : (
           <div className="py-8 text-center text-xs text-muted-foreground border border-dashed rounded-lg">
-            Select two receipts above to calculate the combined net balance settlement.
+            Select at least two unpaid receipts above to calculate the combined net balance settlement.
           </div>
         )}
 
@@ -375,7 +569,7 @@ export function CombinedReceiptDialog({
             Close
           </Button>
 
-          {receipt1 && receipt2 && (
+          {hasEnoughReceipts && allLoaded && (
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
@@ -391,7 +585,7 @@ export function CombinedReceiptDialog({
                 size="sm"
                 className="bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
                 disabled={settling}
-                onClick={handleSettleBoth}
+                onClick={handleSettleAll}
               >
                 {settling ? (
                   <>
@@ -401,7 +595,7 @@ export function CombinedReceiptDialog({
                 ) : (
                   <>
                     <CheckCircle2 className="size-4 mr-1.5" />
-                    Settle & Mark Both as Paid
+                    Settle & Mark All {loadedReceipts.length} as Paid
                   </>
                 )}
               </Button>
