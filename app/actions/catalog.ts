@@ -79,15 +79,26 @@ export type ProductInput = {
 }
 
 export async function getProducts() {
-  return db.select().from(products).orderBy(asc(products.name))
+  const list = await db.select().from(products)
+  return list.sort((a, b) => {
+    const sizeA = Number(a.packageSize) || 0
+    const sizeB = Number(b.packageSize) || 0
+    if (sizeA !== sizeB) return sizeA - sizeB
+    return a.name.localeCompare(b.name)
+  })
 }
 
 export async function getProductsByVendor(vendorId: number) {
-  return db
+  const list = await db
     .select()
     .from(products)
     .where(eq(products.vendorId, vendorId))
-    .orderBy(asc(products.name))
+  return list.sort((a, b) => {
+    const sizeA = Number(a.packageSize) || 0
+    const sizeB = Number(b.packageSize) || 0
+    if (sizeA !== sizeB) return sizeA - sizeB
+    return a.name.localeCompare(b.name)
+  })
 }
 
 export async function createProduct(input: ProductInput) {

@@ -59,7 +59,7 @@ export function ProductsList({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return products.filter((p) => {
+    const list = products.filter((p) => {
       if (vendorFilter !== "all" && String(p.vendorId) !== vendorFilter)
         return false
       if (!q) return true
@@ -67,6 +67,15 @@ export function ProductsList({
       return (
         p.name.toLowerCase().includes(q) || vName.toLowerCase().includes(q)
       )
+    })
+
+    return list.sort((a, b) => {
+      const sizeA = Number(a.packageSize) || 0
+      const sizeB = Number(b.packageSize) || 0
+      if (sizeA !== sizeB) {
+        return sizeA - sizeB
+      }
+      return a.name.localeCompare(b.name)
     })
   }, [products, query, vendorFilter, vendorMap])
 

@@ -82,11 +82,28 @@ async function seed() {
         { vendorId: pepsi.id, name: "Aquafina Water", packageSize: "16", unit: "oz", caseCount: 24, defaultCasePrice: "17.00" },
 
         // Red Bull
-        { vendorId: redbull.id, name: "Red Bull Original", packageSize: "8.4", unit: "oz", caseCount: 24, defaultCasePrice: "38.00" },
-        { vendorId: redbull.id, name: "Red Bull Original", packageSize: "12", unit: "oz", caseCount: 24, defaultCasePrice: "48.00" },
-        { vendorId: redbull.id, name: "Red Bull Sugar Free", packageSize: "8.4", unit: "oz", caseCount: 24, defaultCasePrice: "38.00" },
-        { vendorId: redbull.id, name: "Red Bull Sugar Free", packageSize: "12", unit: "oz", caseCount: 24, defaultCasePrice: "48.00" },
-        { vendorId: redbull.id, name: "Red Bull Tropical", packageSize: "8.4", unit: "oz", caseCount: 24, defaultCasePrice: "38.00" },
+        { vendorId: redbull.id, name: "Red Bull Original", packageSize: "8.4", unit: "oz", caseCount: 24, defaultCasePrice: "40.24", retailPrice: "2.99" },
+        { vendorId: redbull.id, name: "Red Bull Original", packageSize: "12", unit: "oz", caseCount: 24, defaultCasePrice: "52.96", retailPrice: "3.89" },
+        { vendorId: redbull.id, name: "Red Bull Sugar Free", packageSize: "8.4", unit: "oz", caseCount: 24, defaultCasePrice: "40.24", retailPrice: "2.99" },
+        { vendorId: redbull.id, name: "Red Bull Sugar Free", packageSize: "12", unit: "oz", caseCount: 24, defaultCasePrice: "52.96", retailPrice: "3.89" },
+        { vendorId: redbull.id, name: "Red Bull Tropical", packageSize: "8.4", unit: "oz", caseCount: 24, defaultCasePrice: "40.24", retailPrice: "2.99" },
+        { vendorId: redbull.id, name: "Red Bull Tropical", packageSize: "12", unit: "oz", caseCount: 24, defaultCasePrice: "52.96", retailPrice: "3.89" },
+        { vendorId: redbull.id, name: "Red Bull Iced Vanilla Berry", packageSize: "8.4", unit: "oz", caseCount: 24, defaultCasePrice: "40.24", retailPrice: "2.99" },
+        { vendorId: redbull.id, name: "Red Bull Iced Vanilla Berry", packageSize: "12", unit: "oz", caseCount: 24, defaultCasePrice: "52.96", retailPrice: "3.89" },
+        { vendorId: redbull.id, name: "Red Bull JuneBerry", packageSize: "8.4", unit: "oz", caseCount: 24, defaultCasePrice: "40.24", retailPrice: "2.99" },
+        { vendorId: redbull.id, name: "Red Bull JuneBerry", packageSize: "12", unit: "oz", caseCount: 24, defaultCasePrice: "52.96", retailPrice: "3.89" },
+        { vendorId: redbull.id, name: "Red Bull White Peach", packageSize: "8.4", unit: "oz", caseCount: 24, defaultCasePrice: "40.24", retailPrice: "2.99" },
+        { vendorId: redbull.id, name: "Red Bull White Peach", packageSize: "12", unit: "oz", caseCount: 24, defaultCasePrice: "52.96", retailPrice: "3.89" },
+        { vendorId: redbull.id, name: "Red Bull Sudachi Lime", packageSize: "8.4", unit: "oz", caseCount: 24, defaultCasePrice: "40.24", retailPrice: "2.99" },
+        { vendorId: redbull.id, name: "Red Bull Sudachi Lime", packageSize: "12", unit: "oz", caseCount: 24, defaultCasePrice: "52.96", retailPrice: "3.89" },
+        { vendorId: redbull.id, name: "Red Bull Coconut", packageSize: "8.4", unit: "oz", caseCount: 24, defaultCasePrice: "40.24", retailPrice: "2.99" },
+        { vendorId: redbull.id, name: "Red Bull Coconut", packageSize: "12", unit: "oz", caseCount: 24, defaultCasePrice: "52.96", retailPrice: "3.89" },
+        { vendorId: redbull.id, name: "Red Bull Strawberry Apricot", packageSize: "8.4", unit: "oz", caseCount: 24, defaultCasePrice: "40.24", retailPrice: "2.99" },
+        { vendorId: redbull.id, name: "Red Bull Strawberry Apricot", packageSize: "12", unit: "oz", caseCount: 24, defaultCasePrice: "52.96", retailPrice: "3.89" },
+        { vendorId: redbull.id, name: "Red Bull Wild Berries", packageSize: "8.4", unit: "oz", caseCount: 24, defaultCasePrice: "40.24", retailPrice: "2.99" },
+        { vendorId: redbull.id, name: "Red Bull Wild Berries", packageSize: "12", unit: "oz", caseCount: 24, defaultCasePrice: "52.96", retailPrice: "3.89" },
+        { vendorId: redbull.id, name: "Red Bull Watermelon", packageSize: "8.4", unit: "oz", caseCount: 24, defaultCasePrice: "40.24", retailPrice: "2.99" },
+        { vendorId: redbull.id, name: "Red Bull Watermelon", packageSize: "12", unit: "oz", caseCount: 24, defaultCasePrice: "52.96", retailPrice: "3.89" },
       ])
       .returning()
 

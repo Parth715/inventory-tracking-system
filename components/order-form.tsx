@@ -119,10 +119,17 @@ export function OrderForm({
   const [productDialog, setProductDialog] = useState(false)
   const [locationDialog, setLocationDialog] = useState(false)
 
-  const vendorProducts = useMemo(
-    () => products.filter((p) => String(p.vendorId) === vendorId),
-    [products, vendorId],
-  )
+  const vendorProducts = useMemo(() => {
+    const list = products.filter((p) => String(p.vendorId) === vendorId)
+    return list.sort((a, b) => {
+      const sizeA = Number(a.packageSize) || 0
+      const sizeB = Number(b.packageSize) || 0
+      if (sizeA !== sizeB) {
+        return sizeA - sizeB
+      }
+      return a.name.localeCompare(b.name)
+    })
+  }, [products, vendorId])
 
   function resetDraft() {
     setProductId("")
@@ -425,12 +432,13 @@ export function OrderForm({
                     options={vendorProducts.map((p) => {
                       const casePrice = p.defaultCasePrice ? Number(p.defaultCasePrice) : null
                       const unitCost = casePrice && p.caseCount > 0 ? casePrice / p.caseCount : null
+                      const pkgLabel = formatPackage(Number(p.packageSize), p.unit)
                       return {
                         value: String(p.id),
-                        label: p.name,
-                        hint: `${formatPackage(Number(p.packageSize), p.unit)}${
-                          unitCost != null ? ` · $${unitCost.toFixed(2)}/ea` : ""
-                        }`,
+                        label: `${p.name} (${pkgLabel})`,
+                        hint: `${
+                          casePrice != null ? `$${casePrice.toFixed(2)}/cs` : ""
+                        }${unitCost != null ? ` · $${unitCost.toFixed(2)}/ea` : ""}`,
                       }
                     })}
                     value={productId}
