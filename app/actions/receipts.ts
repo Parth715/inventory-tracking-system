@@ -3,6 +3,7 @@
 import { db } from "@/lib/db"
 import {
   locations,
+  products,
   receiptItems,
   receipts,
   vendors,
@@ -69,6 +70,8 @@ export type ReceiptDetailItem = {
   pricePerCase: number
   itemType: LineItemType
   reason: string | null
+  retailPrice: number | null
+  caseCount: number | null
 }
 
 export type ReceiptDetail = {
@@ -209,8 +212,22 @@ export async function getReceipt(id: number): Promise<ReceiptDetail | null> {
   if (!row) return null
 
   const items = await db
-    .select()
+    .select({
+      id: receiptItems.id,
+      receiptId: receiptItems.receiptId,
+      productId: receiptItems.productId,
+      productName: receiptItems.productName,
+      packageSize: receiptItems.packageSize,
+      unit: receiptItems.unit,
+      cases: receiptItems.cases,
+      pricePerCase: receiptItems.pricePerCase,
+      itemType: receiptItems.itemType,
+      reason: receiptItems.reason,
+      retailPrice: products.retailPrice,
+      caseCount: products.caseCount,
+    })
     .from(receiptItems)
+    .leftJoin(products, eq(receiptItems.productId, products.id))
     .where(eq(receiptItems.receiptId, id))
 
   let grossAmount = 0
@@ -235,6 +252,8 @@ export async function getReceipt(id: number): Promise<ReceiptDetail | null> {
       pricePerCase: Number(it.pricePerCase),
       itemType,
       reason: it.reason ?? null,
+      retailPrice: it.retailPrice ? Number(it.retailPrice) : null,
+      caseCount: it.caseCount ?? null,
     }
   })
 

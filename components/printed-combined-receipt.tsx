@@ -149,7 +149,7 @@ export function PrintedCombinedReceipt({
   const loc2Name = locNames[1] || locNames[0] || "Store 2"
 
   return (
-    <div className="print-area receipt-paper mx-auto max-w-2xl rounded-xl border border-border bg-card p-8 font-mono text-sm shadow-md relative overflow-hidden">
+    <div className="print-area receipt-paper mx-auto max-w-4xl rounded-xl border border-border bg-card p-8 font-mono text-sm shadow-md relative overflow-hidden">
       {/* Decorative top border */}
       <div className="mb-4 flex items-center gap-2">
         <div className="h-px flex-1 bg-foreground/20" />
@@ -254,37 +254,85 @@ export function PrintedCombinedReceipt({
               </span>
               <span className="font-mono">{formatCurrency(r.netAmount)}</span>
             </div>
-            <table className="w-full text-xs">
+            <table className="w-full table-fixed text-xs">
+              <colgroup>
+                <col className="w-[36%]" />
+                <col className="w-[10%]" />
+                <col className="w-[14%]" />
+                <col className="w-[16%]" />
+                <col className="w-[12%]" />
+                <col className="w-[12%]" />
+              </colgroup>
               <thead>
                 <tr className="border-b border-foreground/20 text-left text-[10px] uppercase text-muted-foreground">
                   <th className="pb-1">Product</th>
                   <th className="pb-1 text-right">Cases</th>
                   <th className="pb-1 text-right">Price</th>
                   <th className="pb-1 text-right">Total</th>
+                  <th className="pb-1 text-right">Retail</th>
+                  <th className="pb-1 text-right">Margin</th>
                 </tr>
               </thead>
               <tbody>
-                {r.items.map((it) => (
-                  <tr
-                    key={`item-${r.id}-${it.id}`}
-                    className="border-b border-dotted border-foreground/10"
-                  >
-                    <td className="py-1">
-                      {it.productName} ({formatPackage(it.packageSize, it.unit)})
-                      {it.itemType === "credit" && (
-                        <span className="text-amber-600 block text-[10px]">[CREDIT]</span>
-                      )}
-                    </td>
-                    <td className="py-1 text-right tabular-nums">{it.cases}</td>
-                    <td className="py-1 text-right tabular-nums">
-                      {formatCurrency(it.pricePerCase)}
-                    </td>
-                    <td className="py-1 text-right font-semibold tabular-nums">
-                      {it.itemType === "credit" ? "-" : ""}
-                      {formatCurrency(it.cases * it.pricePerCase)}
-                    </td>
-                  </tr>
-                ))}
+                {r.items.map((it) => {
+                  const retailPrice = it.retailPrice
+                  const caseCount = it.caseCount
+                  const retailRevenuePerCase =
+                    retailPrice && caseCount ? retailPrice * caseCount : null
+                  const marginPct =
+                    retailRevenuePerCase && it.pricePerCase > 0
+                      ? ((retailRevenuePerCase - it.pricePerCase) /
+                          it.pricePerCase) *
+                        100
+                      : null
+                  const isItemCredit = it.itemType === "credit"
+                  return (
+                    <tr
+                      key={`item-${r.id}-${it.id}`}
+                      className="border-b border-dotted border-foreground/10"
+                    >
+                      <td className="py-1">
+                        {it.productName} ({formatPackage(it.packageSize, it.unit)})
+                        {isItemCredit && (
+                          <span className="text-amber-600 block text-[10px]">[CREDIT]</span>
+                        )}
+                      </td>
+                      <td className="py-1 text-right tabular-nums">{it.cases}</td>
+                      <td className="py-1 text-right tabular-nums">
+                        {formatCurrency(it.pricePerCase)}
+                      </td>
+                      <td className="py-1 text-right font-semibold tabular-nums">
+                        {isItemCredit ? "-" : ""}
+                        {formatCurrency(it.cases * it.pricePerCase)}
+                      </td>
+                      <td className="py-1 text-right tabular-nums text-muted-foreground">
+                        {isItemCredit
+                          ? "—"
+                          : retailPrice != null
+                            ? formatCurrency(retailPrice)
+                            : "—"}
+                      </td>
+                      <td
+                        className={cn(
+                          "py-1 text-right tabular-nums font-semibold",
+                          isItemCredit
+                            ? "text-muted-foreground"
+                            : marginPct != null && marginPct > 0
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : marginPct != null && marginPct < 0
+                                ? "text-red-600 dark:text-red-400"
+                                : "text-muted-foreground",
+                        )}
+                      >
+                        {isItemCredit
+                          ? "—"
+                          : marginPct != null
+                            ? `${marginPct.toFixed(1)}%`
+                            : "—"}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

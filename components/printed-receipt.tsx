@@ -36,7 +36,7 @@ export function PrintedReceipt({ receipt }: { receipt: ReceiptDetail }) {
   return (
     <div
       className={cn(
-        "print-area receipt-paper mx-auto max-w-xl rounded-xl border bg-card p-8 font-mono text-sm shadow-md relative overflow-hidden",
+        "print-area receipt-paper mx-auto max-w-3xl rounded-xl border bg-card p-8 font-mono text-sm shadow-md relative overflow-hidden",
         isOnlyCredit ? "border-amber-500/40" : "border-border",
       )}
     >
@@ -149,18 +149,39 @@ export function PrintedReceipt({ receipt }: { receipt: ReceiptDetail }) {
       )}
 
       {/* Line items table */}
-      <table className="w-full">
+      <table className="w-full table-fixed">
+        <colgroup>
+          <col className="w-[36%]" />
+          <col className="w-[10%]" />
+          <col className="w-[14%]" />
+          <col className="w-[16%]" />
+          <col className="w-[12%]" />
+          <col className="w-[12%]" />
+        </colgroup>
         <thead>
           <tr className="border-b border-foreground/20 text-left text-[11px] uppercase tracking-wider text-muted-foreground">
             <th className="pb-2 pt-4 font-semibold">Item & Type</th>
             <th className="pb-2 pt-4 text-right font-semibold">Cases</th>
             <th className="pb-2 pt-4 text-right font-semibold">Price</th>
             <th className="pb-2 pt-4 text-right font-semibold">Total</th>
+            <th className="pb-2 pt-4 text-right font-semibold">Retail</th>
+            <th className="pb-2 pt-4 text-right font-semibold">Margin</th>
           </tr>
         </thead>
         <tbody>
           {items.map((it, i) => {
             const isItemCredit = it.itemType === "credit"
+            const retailPrice = it.retailPrice
+            const caseCount = it.caseCount
+            // Suggested retail revenue per case = retailPrice * units per case
+            const retailRevenuePerCase =
+              retailPrice && caseCount ? retailPrice * caseCount : null
+            // Profit margin % = ((retail revenue - cost) / cost) * 100
+            const marginPct =
+              retailRevenuePerCase && it.pricePerCase > 0
+                ? ((retailRevenuePerCase - it.pricePerCase) / it.pricePerCase) *
+                  100
+                : null
             return (
               <tr
                 key={it.id}
@@ -197,6 +218,31 @@ export function PrintedReceipt({ receipt }: { receipt: ReceiptDetail }) {
                 >
                   {isItemCredit ? "-" : ""}
                   {formatCurrency(it.cases * it.pricePerCase)}
+                </td>
+                <td className="py-2.5 text-right tabular-nums text-muted-foreground">
+                  {isItemCredit
+                    ? "—"
+                    : retailPrice != null
+                      ? formatCurrency(retailPrice)
+                      : "—"}
+                </td>
+                <td
+                  className={cn(
+                    "py-2.5 text-right tabular-nums font-semibold",
+                    isItemCredit
+                      ? "text-muted-foreground"
+                      : marginPct != null && marginPct > 0
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : marginPct != null && marginPct < 0
+                          ? "text-red-600 dark:text-red-400"
+                          : "text-muted-foreground",
+                  )}
+                >
+                  {isItemCredit
+                    ? "—"
+                    : marginPct != null
+                      ? `${marginPct.toFixed(1)}%`
+                      : "—"}
                 </td>
               </tr>
             )
