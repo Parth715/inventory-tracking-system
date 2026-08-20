@@ -176,10 +176,10 @@ export function PrintedReceipt({ receipt }: { receipt: ReceiptDetail }) {
             // Suggested retail revenue per case = retailPrice * units per case
             const retailRevenuePerCase =
               retailPrice && caseCount ? retailPrice * caseCount : null
-            // Profit margin % = ((retail revenue - cost) / cost) * 100
+            // Gross Profit Margin % = ((retail revenue - cost) / retail revenue) * 100
             const marginPct =
-              retailRevenuePerCase && it.pricePerCase > 0
-                ? ((retailRevenuePerCase - it.pricePerCase) / it.pricePerCase) *
+              retailRevenuePerCase && retailRevenuePerCase > 0
+                ? ((retailRevenuePerCase - it.pricePerCase) / retailRevenuePerCase) *
                   100
                 : null
             return (
