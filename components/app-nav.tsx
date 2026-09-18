@@ -19,7 +19,7 @@ export function AppNav() {
   const pathname = usePathname()
 
   return (
-    <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur">
+    <header className="no-print sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur">
       <div className="mx-auto flex h-16 w-full max-w-6xl items-center gap-6 px-4">
         <Link href="/" className="flex items-center gap-2 shrink-0">
           <span className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">

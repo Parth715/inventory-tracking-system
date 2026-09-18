@@ -179,23 +179,75 @@
 }
 
 @media print {
-  .no-print {
+  .no-print,
+  [data-slot="dialog-close"],
+  [data-slot="dialog-overlay"] {
     display: none !important;
   }
-  .print-area {
-    box-shadow: none !important;
-    border: none !important;
-    max-width: 100% !important;
-    margin: 0 !important;
-    padding: 1.5rem !important;
-  }
+
+  html,
   body {
     background: white !important;
+    color: black !important;
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+
+  /* When printing while a dialog is open, hide the main page background */
+  body:has([data-slot="dialog-content"]) main,
+  body:has([data-slot="dialog-content"]) header {
+    display: none !important;
+  }
+
+  /* Completely reset dialog modal constraints and positioning for full-width printing */
+  [data-slot="dialog-portal"],
+  [data-base-ui-portal] {
+    display: block !important;
+    position: static !important;
+  }
+
+  [data-slot="dialog-content"],
+  div[role="dialog"] {
+    position: static !important;
+    transform: none !important;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    inset: auto !important;
+    max-height: none !important;
+    height: auto !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    overflow: visible !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .print-area {
+    box-shadow: none !important;
+    border: 1px solid rgba(0, 0, 0, 0.2) !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 auto !important;
+    padding: 1.5rem !important;
+    background: white !important;
+    color: black !important;
+  }
+
+  .print-avoid-break {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
   @page {
-    margin: 0.5in;
+    margin: 0.4in;
     size: auto;
   }
 }

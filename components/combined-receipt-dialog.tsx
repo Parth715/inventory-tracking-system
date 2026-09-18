@@ -44,6 +44,7 @@ import {
   computeNetReconciliation,
   PrintedCombinedReceipt,
 } from "@/components/printed-combined-receipt"
+import { printReceiptElement } from "@/lib/print-slip"
 
 interface ReceiptSlot {
   key: string
@@ -274,8 +275,8 @@ export function CombinedReceiptDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-4xl max-h-[92vh] overflow-y-auto">
+        <DialogHeader className="no-print">
           <div className="flex items-center gap-2 text-primary font-semibold text-xs tracking-wide uppercase">
             <Scale className="size-4" />
             <span>Inter-Store Net Reconciliation</span>
@@ -290,7 +291,7 @@ export function CombinedReceiptDialog({
 
         {/* 2-Store Lock Indicator Banner */}
         {establishedLocations.locked && establishedLocations.loc1 && establishedLocations.loc2 && (
-          <div className="animate-in fade-in duration-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-xs">
+          <div className="no-print animate-in fade-in duration-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-xs">
             <div className="flex items-center gap-2 font-medium">
               <Store className="size-4 text-primary shrink-0" />
               <span>
@@ -311,7 +312,7 @@ export function CombinedReceiptDialog({
         )}
 
         {/* Receipt Slots */}
-        <div className="space-y-3 pt-2">
+        <div className="no-print space-y-3 pt-2">
           {slots.map((slot, idx) => {
             const options = getOptionsForSlot(slot)
             return (
@@ -415,14 +416,14 @@ export function CombinedReceiptDialog({
 
         {/* Results */}
         {anyLoading ? (
-          <div className="py-8 flex flex-col items-center justify-center gap-2 text-muted-foreground text-sm">
+          <div className="no-print py-8 flex flex-col items-center justify-center gap-2 text-muted-foreground text-sm">
             <Loader2 className="size-6 animate-spin text-primary" />
             <span>Calculating net reconciliation...</span>
           </div>
         ) : hasEnoughReceipts && allLoaded && recon ? (
           <div className="space-y-4 pt-2">
             {/* View Mode Toggle */}
-            <div className="flex items-center justify-between border-b border-border pb-2">
+            <div className="no-print flex items-center justify-between border-b border-border pb-2">
               <div className="flex items-center gap-2">
                 <Button
                   variant={viewMode === "summary" ? "secondary" : "ghost"}
@@ -447,7 +448,7 @@ export function CombinedReceiptDialog({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => window.print()}
+                onClick={() => printReceiptElement("printable-combined-receipt")}
                 className="cursor-pointer text-xs"
               >
                 <Printer className="size-3.5 mr-1" />
@@ -457,109 +458,135 @@ export function CombinedReceiptDialog({
 
             {/* Net Calculation Summary View */}
             {viewMode === "summary" ? (
-              <div className="space-y-4">
-                <div className="rounded-xl border-2 border-primary/40 bg-primary/5 p-4 shadow-sm">
-                  <div className="flex items-center justify-between text-xs text-muted-foreground font-semibold uppercase tracking-wider">
-                    <span>Inter-Store Net Result</span>
-                    <span className="font-mono text-foreground font-bold">
-                      {loadedReceipts.map((r) => `#${r.id}`).join(" + ")}
-                    </span>
+              <>
+                <div className="no-print space-y-4">
+                  <div className="rounded-xl border-2 border-primary/40 bg-primary/5 p-4 shadow-sm">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground font-semibold uppercase tracking-wider">
+                      <span>Inter-Store Net Result</span>
+                      <span className="font-mono text-foreground font-bold">
+                        {loadedReceipts.map((r) => `#${r.id}`).join(" + ")}
+                      </span>
+                    </div>
+
+                    {/* Visual Comparison Grid */}
+                    <div className="my-3 grid grid-cols-1 sm:grid-cols-2 gap-2 border-y border-border/80 py-3">
+                      {loadedReceipts.map((r) => (
+                        <div
+                          key={r.id}
+                          className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2 text-xs"
+                        >
+                          <div>
+                            <span className="font-mono text-muted-foreground font-bold">
+                              #{r.id}
+                            </span>{" "}
+                            <span className="font-semibold">{r.locationName}</span>
+                            {r.payableToLocationName && (
+                              <span className="text-primary font-medium">
+                                {" → "}
+                                {r.payableToLocationName}
+                              </span>
+                            )}
+                          </div>
+                          <span className="font-mono font-bold">
+                            {formatCurrency(r.netAmount)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Final Net Payment Banner */}
+                    <div className="rounded-lg bg-background p-3 border border-border/80 text-center sm:text-left sm:flex sm:items-center sm:justify-between">
+                      <div>
+                        <span className="text-xs uppercase font-bold tracking-wider text-muted-foreground block">
+                          Final Payment Settlement
+                        </span>
+                        <p className="text-sm font-semibold text-foreground mt-0.5">
+                          {recon.summaryText}
+                        </p>
+                      </div>
+                      <div className="mt-2 sm:mt-0 font-mono text-2xl font-bold text-primary">
+                        {formatCurrency(recon.netAmount)}
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Visual Comparison Grid */}
-                  <div className="my-3 grid grid-cols-1 sm:grid-cols-2 gap-2 border-y border-border/80 py-3">
+                  {/* Line Items Summary */}
+                  <div
+                    className={cn(
+                      "grid gap-3 text-xs text-muted-foreground",
+                      loadedReceipts.length <= 3
+                        ? "sm:grid-cols-2 lg:grid-cols-3"
+                        : "sm:grid-cols-2",
+                    )}
+                  >
                     {loadedReceipts.map((r) => (
                       <div
                         key={r.id}
-                        className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2 text-xs"
+                        className="rounded-lg border border-border bg-muted/20 p-3"
                       >
-                        <div>
-                          <span className="font-mono text-muted-foreground font-bold">
-                            #{r.id}
-                          </span>{" "}
-                          <span className="font-semibold">{r.locationName}</span>
-                          {r.payableToLocationName && (
-                            <span className="text-primary font-medium">
-                              {" → "}
-                              {r.payableToLocationName}
-                            </span>
+                        <p className="font-semibold text-foreground mb-1">
+                          Receipt #{r.id} ({r.locationName})
+                        </p>
+                        <ul className="space-y-1">
+                          {r.items.slice(0, 4).map((it) => (
+                            <li key={it.id} className="flex justify-between">
+                              <span className="truncate pr-2">
+                                {it.productName} ({it.cases} cs)
+                              </span>
+                              <span className="font-mono font-medium text-foreground">
+                                {formatCurrency(it.cases * it.pricePerCase)}
+                              </span>
+                            </li>
+                          ))}
+                          {r.items.length > 4 && (
+                            <li className="text-[11px] italic">
+                              +{r.items.length - 4} more item(s)...
+                            </li>
                           )}
-                        </div>
-                        <span className="font-mono font-bold">
-                          {formatCurrency(r.netAmount)}
-                        </span>
+                        </ul>
                       </div>
                     ))}
                   </div>
-
-                  {/* Final Net Payment Banner */}
-                  <div className="rounded-lg bg-background p-3 border border-border/80 text-center sm:text-left sm:flex sm:items-center sm:justify-between">
-                    <div>
-                      <span className="text-xs uppercase font-bold tracking-wider text-muted-foreground block">
-                        Final Payment Settlement
-                      </span>
-                      <p className="text-sm font-semibold text-foreground mt-0.5">
-                        {recon.summaryText}
-                      </p>
-                    </div>
-                    <div className="mt-2 sm:mt-0 font-mono text-2xl font-bold text-primary">
-                      {formatCurrency(recon.netAmount)}
-                    </div>
-                  </div>
                 </div>
 
-                {/* Line Items Summary */}
-                <div
-                  className={cn(
-                    "grid gap-3 text-xs text-muted-foreground",
-                    loadedReceipts.length <= 3
-                      ? "sm:grid-cols-2 lg:grid-cols-3"
-                      : "sm:grid-cols-2",
-                  )}
-                >
-                  {loadedReceipts.map((r) => (
-                    <div
-                      key={r.id}
-                      className="rounded-lg border border-border bg-muted/20 p-3"
-                    >
-                      <p className="font-semibold text-foreground mb-1">
-                        Receipt #{r.id} ({r.locationName})
-                      </p>
-                      <ul className="space-y-1">
-                        {r.items.slice(0, 4).map((it) => (
-                          <li key={it.id} className="flex justify-between">
-                            <span className="truncate pr-2">
-                              {it.productName} ({it.cases} cs)
-                            </span>
-                            <span className="font-mono font-medium text-foreground">
-                              {formatCurrency(it.cases * it.pricePerCase)}
-                            </span>
-                          </li>
-                        ))}
-                        {r.items.length > 4 && (
-                          <li className="text-[11px] italic">
-                            +{r.items.length - 4} more item(s)...
-                          </li>
-                        )}
-                      </ul>
-                    </div>
-                  ))}
+                {/* Print-only settlement slip when in summary view */}
+                <div className="hidden print:block">
+                  <PrintedCombinedReceipt receipts={loadedReceipts} />
                 </div>
-              </div>
+              </>
             ) : (
               /* Printable Slip View */
-              <div className="border border-border rounded-xl p-2 bg-muted/20 overflow-x-auto">
-                <PrintedCombinedReceipt receipts={loadedReceipts} />
+              <div>
+                <div className="no-print mb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3.5 py-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <FileSpreadsheet className="size-4 text-primary shrink-0" />
+                    <span className="text-muted-foreground">
+                      Standard thermal/paper settlement slip layout with itemized margins & dual signatures.
+                    </span>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => printReceiptElement("printable-combined-receipt")}
+                    className="cursor-pointer text-xs shrink-0"
+                  >
+                    <Printer className="size-3.5 mr-1.5" />
+                    Print Slip / PDF
+                  </Button>
+                </div>
+
+                <div className="border border-border/80 rounded-xl p-2 sm:p-4 bg-muted/20 overflow-x-auto print:border-none print:p-0 print:bg-transparent">
+                  <PrintedCombinedReceipt receipts={loadedReceipts} />
+                </div>
               </div>
             )}
           </div>
         ) : (
-          <div className="py-8 text-center text-xs text-muted-foreground border border-dashed rounded-lg">
+          <div className="no-print py-8 text-center text-xs text-muted-foreground border border-dashed rounded-lg">
             Select at least two unpaid receipts above to calculate the combined net balance settlement.
           </div>
         )}
 
-        <DialogFooter className="flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-border pt-4">
+        <DialogFooter className="no-print flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-border pt-4">
           <Button
             variant="outline"
             size="sm"
@@ -574,7 +601,7 @@ export function CombinedReceiptDialog({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => window.print()}
+                onClick={() => printReceiptElement("printable-combined-receipt")}
                 className="cursor-pointer"
               >
                 <Printer className="size-4 mr-1.5" />
